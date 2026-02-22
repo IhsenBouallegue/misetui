@@ -2,6 +2,12 @@
 name = "misetui"
 version = "0.1.0"
 edition = "2021"
+description = "A terminal user interface for mise"
+license = "MIT"
+repository = "https://github.com/IhsenBouallegue/misetui"
+homepage = "https://github.com/IhsenBouallegue/misetui"
+keywords = ["mise", "tui", "cli", "devtools"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 color-eyre = "0.6"
