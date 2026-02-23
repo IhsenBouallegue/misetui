@@ -75,42 +75,40 @@
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROJ-01 | — | Pending |
-| PROJ-02 | — | Pending |
-| PROJ-03 | — | Pending |
-| PROJ-04 | — | Pending |
-| PROJ-05 | — | Pending |
-| PROJ-06 | — | Pending |
-| PROJ-07 | — | Pending |
-| DRFT-01 | — | Pending |
-| DRFT-02 | — | Pending |
-| DRFT-03 | — | Pending |
-| BOOT-01 | — | Pending |
-| BOOT-02 | — | Pending |
-| BOOT-03 | — | Pending |
-| BOOT-04 | — | Pending |
-| BOOT-05 | — | Pending |
-| BOOT-06 | — | Pending |
-| BOOT-07 | — | Pending |
-| EDIT-01 | — | Pending |
-| EDIT-02 | — | Pending |
-| EDIT-03 | — | Pending |
-| EDIT-04 | — | Pending |
-| EDIT-05 | — | Pending |
-| EDIT-06 | — | Pending |
-| EDIT-07 | — | Pending |
-| EDIT-08 | — | Pending |
-| EDIT-09 | — | Pending |
+| PROJ-01 | Phase 1 | Pending |
+| PROJ-02 | Phase 1 | Pending |
+| PROJ-03 | Phase 1 | Pending |
+| PROJ-04 | Phase 1 | Pending |
+| PROJ-05 | Phase 1 | Pending |
+| PROJ-06 | Phase 1 | Pending |
+| PROJ-07 | Phase 1 | Pending |
+| DRFT-01 | Phase 2 | Pending |
+| DRFT-02 | Phase 2 | Pending |
+| DRFT-03 | Phase 2 | Pending |
+| BOOT-01 | Phase 3 | Pending |
+| BOOT-02 | Phase 3 | Pending |
+| BOOT-03 | Phase 3 | Pending |
+| BOOT-04 | Phase 3 | Pending |
+| BOOT-05 | Phase 3 | Pending |
+| BOOT-06 | Phase 3 | Pending |
+| BOOT-07 | Phase 3 | Pending |
+| EDIT-01 | Phase 4 | Pending |
+| EDIT-02 | Phase 4 | Pending |
+| EDIT-03 | Phase 4 | Pending |
+| EDIT-04 | Phase 4 | Pending |
+| EDIT-05 | Phase 4 | Pending |
+| EDIT-06 | Phase 4 | Pending |
+| EDIT-07 | Phase 4 | Pending |
+| EDIT-08 | Phase 4 | Pending |
+| EDIT-09 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 26 total
-- Mapped to phases: 0
-- Unmapped: 26 ⚠️
+- Mapped to phases: 26
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-23*
-*Last updated: 2026-02-23 after initial definition*
+*Last updated: 2026-02-23 after roadmap creation*
