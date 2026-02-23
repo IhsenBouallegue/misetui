@@ -12,6 +12,11 @@ use action::Action;
 use app::{App, Popup};
 use color_eyre::Result;
 use event::EventHandler;
+use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::PathBuf;
+use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -26,6 +31,77 @@ async fn main() -> Result<()> {
 
     // Start fetching data
     app.start_fetch();
+
+    // Filesystem watcher for drift indicator (DRFT-02)
+    // Watches .mise.toml in CWD and ~/.config/mise/config.toml.
+    // Uses a std::sync::mpsc channel bridged to tokio via Arc<Mutex<Receiver>>.
+    {
+        let watch_tx = action_tx.clone();
+        tokio::spawn(async move {
+            // Build list of paths to watch
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let mise_toml = cwd.join(".mise.toml");
+
+            let global_config =
+                dirs::config_dir().map(|p| p.join("mise").join("config.toml"));
+
+            // std channel — notify requires a std Sender
+            let (std_tx, std_rx) = std_mpsc::channel::<()>();
+            let std_rx = Arc::new(Mutex::new(std_rx));
+
+            let mut watcher = match RecommendedWatcher::new(
+                move |res: notify::Result<notify::Event>| {
+                    if let Ok(event) = res {
+                        match event.kind {
+                            EventKind::Create(_)
+                            | EventKind::Modify(_)
+                            | EventKind::Remove(_) => {
+                                let _ = std_tx.send(());
+                            }
+                            _ => {}
+                        }
+                    }
+                },
+                NotifyConfig::default()
+                    .with_poll_interval(Duration::from_millis(200)),
+            ) {
+                Ok(w) => w,
+                Err(_) => return, // Watcher unavailable — graceful degradation
+            };
+
+            // Watch .mise.toml (non-recursive; file may not exist yet — errors silently ignored)
+            let _ = watcher.watch(&mise_toml, RecursiveMode::NonRecursive);
+            if let Some(ref gc) = global_config {
+                let _ = watcher.watch(gc, RecursiveMode::NonRecursive);
+            }
+
+            // Debounce loop: coalesce burst writes into one CheckDrift every ~200ms
+            loop {
+                let std_rx_clone = Arc::clone(&std_rx);
+                let received = tokio::task::spawn_blocking(move || {
+                    let rx = std_rx_clone.lock().unwrap();
+                    rx.recv_timeout(Duration::from_millis(500))
+                })
+                .await;
+
+                match received {
+                    Ok(Ok(())) => {
+                        // Drain any additional events accumulated during debounce window
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        {
+                            let rx = std_rx.lock().unwrap();
+                            while rx.try_recv().is_ok() {}
+                        }
+                        let _ = watch_tx.send(Action::CheckDrift);
+                    }
+                    Ok(Err(_)) => {
+                        // recv_timeout timed out — just loop (keep watching)
+                    }
+                    Err(_) => break, // spawn_blocking panicked — exit watcher
+                }
+            }
+        });
+    }
 
     loop {
         // Render

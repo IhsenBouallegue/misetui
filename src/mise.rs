@@ -404,3 +404,37 @@ pub async fn check_cwd_drift() -> Result<DriftState, String> {
 
     Ok(DriftState::Healthy)
 }
+
+/// Run `mise install` in the specified project directory.
+pub async fn install_project_tools(path: &str) -> Result<String, String> {
+    let output = Command::new("mise")
+        .args(["install"])
+        .current_dir(path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise install: {e}"))?;
+
+    if output.status.success() {
+        Ok(format!("Installed tools in {path}"))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("mise install failed: {stderr}"))
+    }
+}
+
+/// Run `mise upgrade` in the specified project directory to update outdated tool pins.
+pub async fn update_project_pins(path: &str) -> Result<String, String> {
+    let output = Command::new("mise")
+        .args(["upgrade"])
+        .current_dir(path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise upgrade: {e}"))?;
+
+    if output.status.success() {
+        Ok(format!("Updated tool pins in {path}"))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("mise upgrade failed: {stderr}"))
+    }
+}

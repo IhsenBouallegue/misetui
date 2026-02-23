@@ -1,7 +1,7 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool,
+    ConfigFile, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
     RegistryEntry,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -18,11 +18,12 @@ pub enum Tab {
     Environment,
     Settings,
     Config,
+    Projects,
     Doctor,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Tab::Tools,
         Tab::Outdated,
         Tab::Registry,
@@ -30,6 +31,7 @@ impl Tab {
         Tab::Environment,
         Tab::Settings,
         Tab::Config,
+        Tab::Projects,
         Tab::Doctor,
     ];
 
@@ -42,6 +44,7 @@ impl Tab {
             Tab::Environment => " Env",
             Tab::Settings => " Settings",
             Tab::Config => " Config",
+            Tab::Projects => " Projects",
             Tab::Doctor => "󰑓 Doctor",
         }
     }
@@ -55,7 +58,8 @@ impl Tab {
             Tab::Environment => 4,
             Tab::Settings => 5,
             Tab::Config => 6,
-            Tab::Doctor => 7,
+            Tab::Projects => 7,
+            Tab::Doctor => 8,
         }
     }
 }
@@ -119,6 +123,7 @@ pub struct App {
     pub tasks: Vec<MiseTask>,
     pub env_vars: Vec<EnvVar>,
     pub settings: Vec<MiseSetting>,
+    pub projects: Vec<MiseProject>,
 
     // Cross-reference
     pub outdated_map: HashMap<String, OutdatedTool>,
@@ -132,6 +137,7 @@ pub struct App {
     pub tasks_state: LoadState,
     pub env_state: LoadState,
     pub settings_state: LoadState,
+    pub projects_state: LoadState,
 
     // Selection / scroll state
     pub tools_selected: usize,
@@ -143,6 +149,9 @@ pub struct App {
     pub tasks_selected: usize,
     pub env_selected: usize,
     pub settings_selected: usize,
+    pub projects_selected: usize,
+    pub projects_drill_selected: usize,
+    pub projects_drill_active: bool,
 
     // Search
     pub search_active: bool,
@@ -155,6 +164,7 @@ pub struct App {
     pub filtered_tasks: Vec<usize>,
     pub filtered_env: Vec<usize>,
     pub filtered_settings: Vec<usize>,
+    pub filtered_projects: Vec<usize>,
 
     // Highlight index caches (parallel to filtered_* arrays, precomputed once per keystroke)
     pub tools_hl: Vec<Vec<usize>>,
@@ -163,6 +173,7 @@ pub struct App {
     pub tasks_hl: Vec<Vec<usize>>,
     pub env_hl: Vec<Vec<usize>>,
     pub settings_hl: Vec<Vec<usize>>,
+    pub projects_hl: Vec<Vec<usize>>,
 
     // Sorting
     pub sort_column: usize,
@@ -202,6 +213,7 @@ impl App {
             tasks: Vec::new(),
             env_vars: Vec::new(),
             settings: Vec::new(),
+            projects: Vec::new(),
 
             outdated_map: HashMap::new(),
 
@@ -213,6 +225,7 @@ impl App {
             tasks_state: LoadState::Loading,
             env_state: LoadState::Loading,
             settings_state: LoadState::Loading,
+            projects_state: LoadState::Loading,
 
             tools_selected: 0,
             registry_selected: 0,
@@ -223,6 +236,9 @@ impl App {
             tasks_selected: 0,
             env_selected: 0,
             settings_selected: 0,
+            projects_selected: 0,
+            projects_drill_selected: 0,
+            projects_drill_active: false,
 
             search_active: false,
             search_query: String::new(),
@@ -234,6 +250,7 @@ impl App {
             filtered_tasks: Vec::new(),
             filtered_env: Vec::new(),
             filtered_settings: Vec::new(),
+            filtered_projects: Vec::new(),
 
             tools_hl: Vec::new(),
             registry_hl: Vec::new(),
@@ -241,6 +258,7 @@ impl App {
             tasks_hl: Vec::new(),
             env_hl: Vec::new(),
             settings_hl: Vec::new(),
+            projects_hl: Vec::new(),
 
             sort_column: 0,
             sort_ascending: true,
@@ -459,6 +477,11 @@ impl App {
                     });
                 }
             }
+            Action::ProjectsLoaded(projects) => {
+                self.projects = projects;
+                self.projects_state = LoadState::Loaded;
+                self.update_filtered_projects();
+            }
             Action::VersionsLoaded(versions) => {
                 if let Some(Popup::Progress { message }) = &self.popup {
                     let tool = message
@@ -491,7 +514,12 @@ impl App {
                 if self.popup.is_some() {
                     return;
                 }
-                if self.tab == Tab::Registry {
+                if self.tab == Tab::Projects {
+                    if let Some(&idx) = self.filtered_projects.get(self.projects_selected) {
+                        let path = self.projects[idx].path.clone();
+                        self.handle_action(Action::InstallProjectTools { path });
+                    }
+                } else if self.tab == Tab::Registry {
                     if let Some(entry) = self.selected_registry_entry() {
                         let tool = entry.short.clone();
                         self.pending_use_global = false;
@@ -566,7 +594,12 @@ impl App {
                 if self.popup.is_some() {
                     return;
                 }
-                if self.tab == Tab::Tools {
+                if self.tab == Tab::Projects {
+                    if let Some(&idx) = self.filtered_projects.get(self.projects_selected) {
+                        let path = self.projects[idx].path.clone();
+                        self.handle_action(Action::UpdateProjectPins { path });
+                    }
+                } else if self.tab == Tab::Tools {
                     let tools = self.visible_tools_vec();
                     if let Some(tool) = tools.get(self.tools_selected) {
                         let name = tool.name.clone();
@@ -713,6 +746,31 @@ impl App {
                 }
             }
 
+            Action::InstallProjectTools { path } => {
+                self.popup = Some(Popup::Progress {
+                    message: format!("Installing tools in {}...", path),
+                });
+                let tx = self.action_tx.clone();
+                tokio::spawn(async move {
+                    match mise::install_project_tools(&path).await {
+                        Ok(msg) => { let _ = tx.send(Action::OperationComplete(msg)); }
+                        Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
+                    }
+                });
+            }
+            Action::UpdateProjectPins { path } => {
+                self.popup = Some(Popup::Progress {
+                    message: format!("Upgrading tools in {}...", path),
+                });
+                let tx = self.action_tx.clone();
+                tokio::spawn(async move {
+                    match mise::update_project_pins(&path).await {
+                        Ok(msg) => { let _ = tx.send(Action::OperationComplete(msg)); }
+                        Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
+                    }
+                });
+            }
+
             Action::CycleSortOrder => {
                 if self.popup.is_some() {
                     return;
@@ -747,6 +805,7 @@ impl App {
                 self.tasks_state = LoadState::Loading;
                 self.env_state = LoadState::Loading;
                 self.settings_state = LoadState::Loading;
+                self.projects_state = LoadState::Loading;
                 self.status_message = Some(("Refreshing...".to_string(), 10));
                 self.start_fetch();
             }
@@ -935,6 +994,15 @@ impl App {
                     match self.tab {
                         Tab::Tools => self.handle_action(Action::ShowToolDetail),
                         Tab::Tasks => self.handle_action(Action::RunTask),
+                        Tab::Projects => {
+                            if self.projects_drill_active {
+                                self.projects_drill_active = false;
+                                self.projects_drill_selected = 0;
+                            } else {
+                                self.projects_drill_active = true;
+                                self.projects_drill_selected = 0;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -989,12 +1057,8 @@ impl App {
                 });
             }
             Action::JumpToDriftProject => {
-                // Phase 2: navigate to Projects tab if it exists; otherwise show hint.
-                // When Phase 1 adds Tab::Projects, update this arm to set self.tab = Tab::Projects.
-                self.status_message = Some((
-                    "Press r on the Projects tab to see CWD health detail.".to_string(),
-                    20,
-                ));
+                self.tab = Tab::Projects;
+                self.sidebar_selected = Tab::Projects.index();
             }
 
             Action::Render | Action::None => {}
@@ -1063,6 +1127,18 @@ impl App {
                 let len = self.filtered_settings.len();
                 Self::adjust_selection(&mut self.settings_selected, delta, len);
             }
+            Tab::Projects => {
+                if self.projects_drill_active {
+                    // Navigate within the selected project's tool list
+                    if let Some(&idx) = self.filtered_projects.get(self.projects_selected) {
+                        let len = self.projects[idx].tools.len();
+                        Self::adjust_selection(&mut self.projects_drill_selected, delta, len);
+                    }
+                } else {
+                    let len = self.filtered_projects.len();
+                    Self::adjust_selection(&mut self.projects_selected, delta, len);
+                }
+            }
         }
     }
 
@@ -1103,6 +1179,7 @@ impl App {
         self.update_filtered_tasks();
         self.update_filtered_env();
         self.update_filtered_settings();
+        self.update_filtered_projects();
     }
 
     fn reset_selection_for_tab(&mut self) {
@@ -1115,6 +1192,10 @@ impl App {
             Tab::Tasks => self.tasks_selected = 0,
             Tab::Environment => self.env_selected = 0,
             Tab::Settings => self.settings_selected = 0,
+            Tab::Projects => {
+                self.projects_selected = 0;
+                self.projects_drill_active = false;
+            }
         }
     }
 
@@ -1329,6 +1410,36 @@ impl App {
         self.filtered_settings = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
+    fn update_filtered_projects(&mut self) {
+        if !self.search_active || self.search_query.is_empty() {
+            self.filtered_projects = (0..self.projects.len()).collect();
+            self.projects_hl = self.filtered_projects.iter().map(|_| Vec::new()).collect();
+            return;
+        }
+        let matcher = SkimMatcherV2::default();
+        let query = &self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .projects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, proj)| {
+                let name_score = matcher.fuzzy_indices(&proj.name, query);
+                let path_score = matcher.fuzzy_indices(&proj.path, query);
+                // Use the better score of name vs path; highlight indices from name match
+                match (name_score, path_score) {
+                    (Some((ns, ni)), Some((ps, _))) if ns >= ps => Some((ns, i, ni)),
+                    (Some((ns, ni)), None) => Some((ns, i, ni)),
+                    (None, Some((ps, _pi))) => Some((ps, i, Vec::new())),
+                    (Some((ns, ni)), Some(_)) => Some((ns, i, ni)),
+                    _ => None,
+                }
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.filtered_projects = scored.iter().map(|(_, i, _)| *i).collect();
+        self.projects_hl = scored.into_iter().map(|(_, _, hl)| hl).collect();
+    }
+
     fn apply_sort(&mut self) {
         let asc = self.sort_ascending;
         let col = self.sort_column;
@@ -1488,6 +1599,13 @@ impl App {
         self.filtered_settings
             .iter()
             .filter_map(|&i| self.settings.get(i))
+            .collect()
+    }
+
+    pub fn visible_projects(&self) -> Vec<&MiseProject> {
+        self.filtered_projects
+            .iter()
+            .filter_map(|&i| self.projects.get(i))
             .collect()
     }
 

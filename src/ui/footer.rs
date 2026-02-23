@@ -38,6 +38,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             hints.push(("t", "trust"));
         }
         Tab::Environment | Tab::Settings | Tab::Doctor => {}
+        Tab::Projects => {
+            hints.push(("i", "install tools"));
+            hints.push(("u", "upgrade pins"));
+            hints.push(("Enter", "drill-down"));
+        }
     }
 
     hints.push(("p", "prune"));

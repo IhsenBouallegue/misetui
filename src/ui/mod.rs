@@ -7,6 +7,7 @@ mod header;
 pub mod layout;
 mod outdated;
 mod popup;
+mod projects;
 mod registry;
 mod settings;
 mod sidebar;
@@ -33,6 +34,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::Settings => settings::render(f, layout.content, app),
         Tab::Config => config::render(f, layout.content, app),
         Tab::Doctor => doctor::render(f, layout.content, app),
+        Tab::Projects => projects::render(f, layout.content, app),
     }
 
     popup::render(f, app);

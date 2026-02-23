@@ -1,5 +1,5 @@
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool,
+    ConfigFile, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
     PruneCandidate, RegistryEntry,
 };
 
@@ -34,6 +34,7 @@ pub enum Action {
     SettingsLoaded(Vec<MiseSetting>),
     PruneLoaded(Vec<PruneCandidate>),
     ToolInfoLoaded(String),
+    ProjectsLoaded(Vec<MiseProject>),
 
     // Drift indicator
     CheckDrift,
@@ -53,6 +54,8 @@ pub enum Action {
     Refresh,
     TrustConfig,
     ShowToolDetail,
+    InstallProjectTools { path: String },
+    UpdateProjectPins { path: String },
     CycleSortOrder,
 
     // Mouse / popup search
