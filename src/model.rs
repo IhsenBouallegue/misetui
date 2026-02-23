@@ -227,3 +227,54 @@ pub enum DriftState {
     Missing,
     NoConfig,
 }
+
+/// Health status for a project or individual tool requirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectHealthStatus {
+    /// All required tools are installed at the correct version.
+    Healthy,
+    /// At least one required tool is installed but at an older version than required.
+    Outdated,
+    /// At least one required tool is not installed at all.
+    Missing,
+    /// No .mise.toml found for this project path.
+    NoConfig,
+}
+
+impl ProjectHealthStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ProjectHealthStatus::Healthy  => "● healthy",
+            ProjectHealthStatus::Outdated => "◐ outdated",
+            ProjectHealthStatus::Missing  => "○ missing",
+            ProjectHealthStatus::NoConfig => "  no config",
+        }
+    }
+}
+
+/// Per-tool health row inside a project drill-down.
+#[derive(Debug, Clone)]
+pub struct ProjectToolHealth {
+    /// Tool name (e.g. "node", "python").
+    pub tool: String,
+    /// Version string as specified in .mise.toml (e.g. "20", "20.1.0", "latest").
+    pub required: String,
+    /// Installed version string, or empty if not installed.
+    pub installed: String,
+    pub status: ProjectHealthStatus,
+}
+
+/// A project discovered by scanning configured directories.
+#[derive(Debug, Clone)]
+pub struct MiseProject {
+    /// Directory name (last path component).
+    pub name: String,
+    /// Absolute path to the project directory (parent of .mise.toml).
+    pub path: String,
+    /// Number of tools declared in .mise.toml.
+    pub tool_count: usize,
+    /// Aggregate health status (worst-case of all tool health statuses).
+    pub health: ProjectHealthStatus,
+    /// Per-tool health breakdown (populated during scan).
+    pub tools: Vec<ProjectToolHealth>,
+}
