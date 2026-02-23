@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 1: Projects Tab
 **Goal**: Users can see and act on the health of all their mise-managed projects from a single tab
 **Depends on**: Nothing (builds on existing app infrastructure)
-**Requirements**: PROJ-01, PROJ-02, PROJ-03, PROJ-04, PROJ-05, PROJ-06, PROJ-07
+**Requirements**: PROJ-01, PROJ-02, PROJ-03, PROJ-04, PROJ-05, PROJ-06, PROJ-07, PROJ-08
 **Success Criteria** (what must be TRUE):
   1. User opens Projects tab and sees a list of all projects found in configured scan directories, each showing name, path, tool count, and health status
   2. User can drill into a project and see per-tool required vs installed version with health status for each tool
@@ -36,6 +36,7 @@ Plans:
 - [ ] 01-02-PLAN.md — Tab::Projects in App state, action wiring (ProjectsLoaded/InstallProjectTools/UpdateProjectPins), start_fetch() integration, i/u/r/search keybindings
 - [ ] 01-03-PLAN.md — src/ui/projects.rs renderer: project list with health badges + per-tool drill-down sub-view
 - [ ] 01-04-PLAN.md — Human verification of all PROJ-01 through PROJ-07 requirements
+- [ ] 01-05-PLAN.md — In-app scan config editor popup (PROJ-08): edit scan_dirs and max_depth, save to config.toml, trigger rescan
 
 ### Phase 2: Drift Indicator
 **Goal**: Users always know whether their current working directory's tool requirements are satisfied, without manually checking
@@ -82,7 +83,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Projects Tab | 3/4 | In Progress|  |
+| 1. Projects Tab | 4/5 | In Progress|  |
 | 2. Drift Indicator | 3/3 | Complete    | 2026-02-23 |
 | 3. Bootstrap Wizard | 0/TBD | Not started | - |
 | 4. Inline Editor | 0/TBD | Not started | - |

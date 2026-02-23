@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 ## Current Position
 
 Phase: 1 of 4 (Projects Tab) — COMPLETE; Phase 2 (Drift Indicator) also complete
-Plan: 3 of 3 complete in phase 01
-Status: Phase 01 Complete — all plans done
-Last activity: 2026-02-23 — Completed 01-03-PLAN.md (Projects tab renderer)
+Plan: 5 of 5 complete in phase 01
+Status: Phase 01 Complete — all 5 plans done
+Last activity: 2026-02-23 — Completed 01-05-PLAN.md (Scan config popup)
 
 Progress: [█████░░░░░] 50%
 
@@ -55,6 +55,7 @@ Recent decisions affecting current work:
 - [Phase 02-drift-indicator plan 03]: Phase 01 compile stubs (update_filtered_projects, install_project_tools, update_project_pins, Tab::Projects UI) completed as Rule 3 auto-fixes
 - [Phase 01-projects-tab plan 02]: Tab::Projects at index 7, Doctor shifts to 8; projects_drill_active flag for drill-down navigation; dual-field fuzzy search (name+path, best score, name highlights); JumpToDriftProject now navigates to Tab::Projects directly
 - [Phase 01-projects-tab plan 03]: render_list/render_drill_down split pattern; health_style() maps ProjectHealthStatus to GREEN/YELLOW/RED/MUTED; path display truncated to last 3 components with ellipsis; Task 1 was pre-satisfied by 01-02 compile stubs
+- [Phase 01-projects-tab plan 05]: ScanConfig popup intercept block before main handle_action match; remap_scan_config_action routes d/a/q keys; MisetuiConfig::save() uses toml::to_string_pretty with Serialize derive; render_scan_config implemented in Task 2 commit to fix non-exhaustive match compile errors from Task 1
 
 ### Pending Todos
 
@@ -67,5 +68,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 01-projects-tab-01-03-PLAN.md (Projects tab renderer — Phase 01 complete)
+Stopped at: Completed 01-projects-tab-01-05-PLAN.md (Scan config popup — Phase 01 fully complete)
 Resume file: None

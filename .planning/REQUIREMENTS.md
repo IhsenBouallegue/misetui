@@ -14,6 +14,7 @@
 - [x] **PROJ-05**: User can update all outdated tool pins for a selected project with `u`
 - [x] **PROJ-06**: User can fuzzy-search project names and paths with `/`
 - [x] **PROJ-07**: User can rescan projects with `r`
+- [x] **PROJ-08**: User can edit scan directories and max depth from inside the app (press `c` on the Projects tab to open a config popup; changes are saved to `~/.config/misetui/config.toml` and trigger an immediate rescan)
 
 ### Drift Indicator
 
@@ -84,6 +85,7 @@
 | PROJ-05 | Phase 1 | Complete |
 | PROJ-06 | Phase 1 | Complete |
 | PROJ-07 | Phase 1 | Complete |
+| PROJ-08 | Phase 1 | Complete |
 | DRFT-01 | Phase 2 | Complete |
 | DRFT-02 | Phase 2 | Complete |
 | DRFT-03 | Phase 2 | Complete |
@@ -105,8 +107,8 @@
 | EDIT-09 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 26 total
-- Mapped to phases: 26
+- v1 requirements: 27 total
+- Mapped to phases: 27
 - Unmapped: 0
 
 ---
