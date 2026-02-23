@@ -318,6 +318,8 @@ pub struct WizardState {
 /// Steps in the Bootstrap Wizard flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WizardStep {
+    /// Tab is open but wizard not started yet.
+    Idle,
     /// Scanning filesystem — spinner shown.
     Detecting,
     /// User reviews and toggles tool list.
@@ -326,4 +328,82 @@ pub enum WizardStep {
     Preview,
     /// Writing file and running mise install — spinner shown.
     Writing,
+}
+
+/// Which sub-tab is active inside the inline editor popup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorTab {
+    Tools,
+    Env,
+    Tasks,
+}
+
+/// Change status for a row in the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRowStatus {
+    /// Unchanged from the file on disk.
+    Unchanged,
+    /// Modified by the user.
+    Modified,
+    /// Newly added by the user.
+    Added,
+    /// Marked for deletion.
+    Deleted,
+}
+
+/// A single editable row in the editor's Tools sub-tab.
+#[derive(Debug, Clone)]
+pub struct EditorToolRow {
+    pub name: String,
+    pub version: String,
+    pub status: EditorRowStatus,
+    /// Original name (for rename tracking in toml_edit Document).
+    pub original_name: Option<String>,
+}
+
+/// A single editable row in the editor's Env sub-tab.
+#[derive(Debug, Clone)]
+pub struct EditorEnvRow {
+    pub key: String,
+    pub value: String,
+    pub status: EditorRowStatus,
+    pub original_key: Option<String>,
+}
+
+/// A single editable row in the editor's Tasks sub-tab.
+#[derive(Debug, Clone)]
+pub struct EditorTaskRow {
+    pub name: String,
+    pub command: String,
+    pub status: EditorRowStatus,
+    pub original_name: Option<String>,
+}
+
+/// Full state for the inline editor popup.
+#[derive(Debug, Clone)]
+pub struct EditorState {
+    /// Absolute path to the .mise.toml being edited.
+    pub file_path: String,
+    /// Active sub-tab (Tools / Env / Tasks).
+    pub tab: EditorTab,
+    /// Tool rows parsed from [tools] table.
+    pub tools: Vec<EditorToolRow>,
+    /// Env rows parsed from [env] table.
+    pub env_vars: Vec<EditorEnvRow>,
+    /// Task rows parsed from [tasks] table.
+    pub tasks: Vec<EditorTaskRow>,
+    /// Currently selected row index (within the active sub-tab).
+    pub selected: usize,
+    /// True when the user is in inline edit mode (typing into a cell).
+    pub editing: bool,
+    /// Which column is being edited (0 = name/key, 1 = version/value/command).
+    pub edit_column: usize,
+    /// Text buffer for the cell being edited.
+    pub edit_buffer: String,
+    /// The raw toml_edit Document for round-trip writes.
+    /// Stored as String (serialized Document) to keep model.rs free of toml_edit dependency.
+    /// Re-parsed in write_editor_changes().
+    pub raw_document: String,
+    /// True if any row has been modified/added/deleted since open.
+    pub dirty: bool,
 }
