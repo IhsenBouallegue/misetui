@@ -1,8 +1,8 @@
 use crate::config::MisetuiConfig;
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseProject,
-    MiseSetting, MiseTask, OutdatedEntry, OutdatedTool, ProjectHealthStatus, ProjectToolHealth,
-    PruneCandidate, RegistryEntry,
+    ConfigFile, DetectedTool, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion,
+    MiseProject, MiseSetting, MiseTask, OutdatedEntry, OutdatedTool, ProjectHealthStatus,
+    ProjectToolHealth, PruneCandidate, RegistryEntry,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -503,4 +503,132 @@ pub async fn update_project_pins(path: &str) -> Result<String, String> {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Err(format!("mise upgrade failed: {stderr}"))
     }
+}
+
+/// Detect tools from filesystem indicators in `dir`, then cross-reference against
+/// `mise ls -J` to mark which tools are already installed.
+///
+/// Filesystem mapping:
+///   package.json        → node  (version from .nvmrc, else "lts")
+///   Cargo.toml          → rust  (version "stable")
+///   pyproject.toml / requirements.txt → python (version from .python-version, else "latest")
+///   go.mod              → go    (version "latest")
+///   Gemfile             → ruby  (version from .ruby-version, else "latest")
+///   composer.json       → php   (version "latest")
+///   .tool-versions      → all tools (via migrate_legacy_pins, lowest priority)
+///
+/// Returns Vec<DetectedTool> sorted by name; `enabled = true`, `installed` from mise ls -J.
+pub async fn detect_project_tools(dir: &str) -> Vec<DetectedTool> {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    let base = Path::new(dir);
+
+    // Helper: read first non-empty, non-comment line
+    let read_first_line = |p: &Path| -> Option<String> {
+        std::fs::read_to_string(p).ok().and_then(|s| {
+            s.lines()
+                .map(|l| l.trim().to_string())
+                .find(|l| !l.is_empty() && !l.starts_with('#'))
+        })
+    };
+
+    let nvmrc_version   = base.join(".nvmrc").exists().then(|| read_first_line(&base.join(".nvmrc"))).flatten();
+    let python_version  = base.join(".python-version").exists().then(|| read_first_line(&base.join(".python-version"))).flatten();
+    let ruby_version    = base.join(".ruby-version").exists().then(|| read_first_line(&base.join(".ruby-version"))).flatten();
+
+    let mut tools: HashMap<String, DetectedTool> = HashMap::new();
+
+    // .tool-versions first (lowest priority)
+    if base.join(".tool-versions").exists() {
+        for t in migrate_legacy_pins(dir) {
+            tools.insert(t.name.clone(), t);
+        }
+    }
+
+    // Filesystem indicators (higher priority)
+    macro_rules! insert_tool {
+        ($name:expr, $version:expr, $source:expr) => {
+            tools.insert($name.to_string(), DetectedTool {
+                name: $name.to_string(),
+                version: $version,
+                source: $source.to_string(),
+                enabled: true,
+                installed: false, // populated below
+            });
+        };
+    }
+
+    if base.join("package.json").exists() {
+        let (v, s) = nvmrc_version.as_deref().map(|v| (v.to_string(), ".nvmrc")).unwrap_or(("lts".to_string(), "package.json"));
+        insert_tool!("node", v, s);
+    }
+    if base.join("Cargo.toml").exists() {
+        insert_tool!("rust", "stable".to_string(), "Cargo.toml");
+    }
+    if base.join("pyproject.toml").exists() || base.join("requirements.txt").exists() {
+        let src = if base.join("pyproject.toml").exists() { "pyproject.toml" } else { "requirements.txt" };
+        let (v, s) = python_version.as_deref().map(|v| (v.to_string(), ".python-version")).unwrap_or(("latest".to_string(), src));
+        insert_tool!("python", v, s);
+    }
+    if base.join("go.mod").exists() {
+        insert_tool!("go", "latest".to_string(), "go.mod");
+    }
+    if base.join("Gemfile").exists() {
+        let (v, s) = ruby_version.as_deref().map(|v| (v.to_string(), ".ruby-version")).unwrap_or(("latest".to_string(), "Gemfile"));
+        insert_tool!("ruby", v, s);
+    }
+    if base.join("composer.json").exists() {
+        insert_tool!("php", "latest".to_string(), "composer.json");
+    }
+
+    // Standalone legacy pin files (no matching indicator file)
+    if !tools.contains_key("node") {
+        if let Some(v) = &nvmrc_version { insert_tool!("node", v.clone(), ".nvmrc"); }
+    }
+    if !tools.contains_key("python") {
+        if let Some(v) = &python_version { insert_tool!("python", v.clone(), ".python-version"); }
+    }
+    if !tools.contains_key("ruby") {
+        if let Some(v) = &ruby_version { insert_tool!("ruby", v.clone(), ".ruby-version"); }
+    }
+
+    // Cross-reference with `mise ls -J` to mark already-installed tools.
+    // JSON structure: { "tool-name": [ { "version": "x.y.z", ... }, ... ] }
+    if let Ok(json) = run_mise(&["ls", "-J"]).await {
+        if let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json) {
+            for (tool_name, entry) in tools.iter_mut() {
+                if let Some(versions) = map.get(tool_name).and_then(|v| v.as_array()) {
+                    let wanted = entry.version.as_str();
+                    entry.installed = versions.iter().any(|v| {
+                        let installed_ver = v["version"].as_str().unwrap_or("");
+                        wanted == "latest" || wanted == "stable" || wanted == "lts"
+                            || installed_ver == wanted
+                            || installed_ver.starts_with(&format!("{wanted}."))
+                    });
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<DetectedTool> = tools.into_values().collect();
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    result
+}
+
+/// Parse `.tool-versions` in `dir` and return a DetectedTool per line.
+/// Format: `tool version` per line; `#` comments and blank lines ignored.
+pub fn migrate_legacy_pins(dir: &str) -> Vec<DetectedTool> {
+    let path = std::path::Path::new(dir).join(".tool-versions");
+    let Ok(contents) = std::fs::read_to_string(&path) else { return Vec::new() };
+    contents
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?.to_string();
+            let version = parts.next().unwrap_or("latest").to_string();
+            Some(DetectedTool { name, version, source: ".tool-versions".to_string(), enabled: true, installed: false })
+        })
+        .collect()
 }
