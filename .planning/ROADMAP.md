@@ -39,7 +39,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. A persistent indicator in the header bar shows healthy / drifted / missing / no-config / checking state for the CWD at all times
   2. When `.mise.toml` or `~/.config/mise/config.toml` changes on disk, the indicator updates automatically within ~200ms — no `r` required
   3. User can press `?` on the drift indicator to jump directly to the Projects drill-down for the current project
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — DriftState model, check_cwd_drift() mise function, notify crate dependency
+- [ ] 02-02-PLAN.md — App drift_state field, header indicator rendering, Action enum additions, P keybinding (DRFT-01, DRFT-03)
+- [ ] 02-03-PLAN.md — Filesystem watcher (notify) spawned at startup, debounced ~200ms auto-refresh (DRFT-02)
 
 ### Phase 3: Bootstrap Wizard
 **Goal**: Users can generate a correct `.mise.toml` for any project directory in under a minute, without knowing the mise config format
@@ -72,6 +77,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Projects Tab | 0/TBD | Not started | - |
-| 2. Drift Indicator | 0/TBD | Not started | - |
+| 2. Drift Indicator | 0/3 | Not started | - |
 | 3. Bootstrap Wizard | 0/TBD | Not started | - |
 | 4. Inline Editor | 0/TBD | Not started | - |
