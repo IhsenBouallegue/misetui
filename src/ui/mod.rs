@@ -1,11 +1,15 @@
 mod config;
 mod doctor;
+mod environment;
 mod footer;
 mod header;
 pub mod layout;
+mod outdated;
 mod popup;
 mod registry;
+mod settings;
 mod sidebar;
+mod tasks;
 mod tools;
 
 use crate::app::{App, Tab};
@@ -21,7 +25,11 @@ pub fn render(f: &mut Frame, app: &App) {
 
     match app.tab {
         Tab::Tools => tools::render(f, layout.content, app),
+        Tab::Outdated => outdated::render(f, layout.content, app),
         Tab::Registry => registry::render(f, layout.content, app),
+        Tab::Tasks => tasks::render(f, layout.content, app),
+        Tab::Environment => environment::render(f, layout.content, app),
+        Tab::Settings => settings::render(f, layout.content, app),
         Tab::Config => config::render(f, layout.content, app),
         Tab::Doctor => doctor::render(f, layout.content, app),
     }

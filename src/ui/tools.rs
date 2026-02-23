@@ -1,6 +1,7 @@
 use crate::app::{App, LoadState};
 use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
@@ -25,7 +26,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::border_focused())
-            .style(ratatui::style::Style::default().bg(theme::SURFACE));
+            .style(Style::default().bg(theme::SURFACE));
 
         let search = Paragraph::new(Line::from(vec![
             Span::styled("/", theme::key_hint()),
@@ -52,7 +53,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(theme::border_focused())
-        .style(ratatui::style::Style::default().bg(theme::BG));
+        .style(Style::default().bg(theme::BG));
 
     if app.tools_state == LoadState::Loading {
         let spinner = app.spinner_char();
@@ -76,10 +77,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let header = Row::new(vec![
-        Cell::from("Name"),
-        Cell::from("Version"),
-        Cell::from("Status"),
-        Cell::from("Source"),
+        Cell::from(format!("Name{}", app.sort_indicator(0))),
+        Cell::from(format!("Version{}", app.sort_indicator(1))),
+        Cell::from(format!("Status{}", app.sort_indicator(2))),
+        Cell::from(format!("Source{}", app.sort_indicator(3))),
     ])
     .style(theme::table_header());
 
@@ -92,9 +93,27 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 Cell::from(Span::styled("○ inactive", theme::inactive_indicator()))
             };
 
+            // Check if tool is outdated and show marker
+            let version_cell =
+                if let Some(outdated) = app.outdated_map.get(&tool.name) {
+                    if outdated.current == tool.version && outdated.latest != tool.version {
+                        Cell::from(Line::from(vec![
+                            Span::styled(&tool.version[..], theme::table_row()),
+                            Span::styled(
+                                format!(" → {}", outdated.latest),
+                                Style::default().fg(theme::YELLOW),
+                            ),
+                        ]))
+                    } else {
+                        Cell::from(Span::styled(&tool.version[..], theme::table_row()))
+                    }
+                } else {
+                    Cell::from(Span::styled(&tool.version[..], theme::table_row()))
+                };
+
             Row::new(vec![
                 Cell::from(Span::styled(&tool.name[..], theme::table_row())),
-                Cell::from(Span::styled(&tool.version[..], theme::table_row())),
+                version_cell,
                 status,
                 Cell::from(Span::styled(&tool.source[..], theme::muted())),
             ])
@@ -103,7 +122,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let widths = [
         Constraint::Length(16),
-        Constraint::Length(14),
+        Constraint::Length(22),
         Constraint::Length(12),
         Constraint::Min(10),
     ];

@@ -2,7 +2,9 @@ use crate::app::{App, Popup};
 use crate::theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+};
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, app: &App) {
@@ -15,12 +17,28 @@ pub fn render(f: &mut Frame, app: &App) {
             tool,
             versions,
             selected,
-        } => render_version_picker(f, tool, versions, *selected),
+            use_global,
+            search_query,
+            filtered_versions,
+        } => render_version_picker(
+            f,
+            tool,
+            versions,
+            *selected,
+            *use_global,
+            search_query,
+            filtered_versions,
+        ),
         Popup::Confirm {
             message,
             action_on_confirm: _,
         } => render_confirm(f, message),
         Popup::Progress { message } => render_progress(f, message, app.spinner_char()),
+        Popup::ToolDetail {
+            tool_name,
+            info,
+            scroll,
+        } => render_tool_detail(f, tool_name, info, *scroll),
         Popup::Help => render_help(f),
     }
 }
@@ -31,13 +49,22 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-fn render_version_picker(f: &mut Frame, tool: &str, versions: &[String], selected: usize) {
-    let area = centered_rect(40, 20, f.area());
+fn render_version_picker(
+    f: &mut Frame,
+    tool: &str,
+    versions: &[String],
+    selected: usize,
+    use_global: bool,
+    search_query: &str,
+    filtered_versions: &[usize],
+) {
+    let area = centered_rect(44, 22, f.area());
     f.render_widget(Clear, area);
 
+    let action_label = if use_global { "Use" } else { "Install" };
     let block = Block::default()
         .title(Span::styled(
-            format!(" Install {tool} "),
+            format!(" {action_label} {tool} "),
             theme::title(),
         ))
         .borders(Borders::ALL)
@@ -47,12 +74,41 @@ fn render_version_picker(f: &mut Frame, tool: &str, versions: &[String], selecte
 
     let inner = block.inner(area);
 
-    // Split into hint + list
-    let chunks = Layout::default()
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(inner);
+    // Split into search bar + hint + list
+    let has_search = !search_query.is_empty();
+    let chunks = if has_search {
+        Layout::default()
+            .constraints([
+                Constraint::Length(1), // search
+                Constraint::Length(1), // hint
+                Constraint::Min(1),   // list
+            ])
+            .split(inner)
+    } else {
+        Layout::default()
+            .constraints([
+                Constraint::Length(0), // no search
+                Constraint::Length(1), // hint
+                Constraint::Min(1),   // list
+            ])
+            .split(inner)
+    };
 
     f.render_widget(block, area);
+
+    // Search bar
+    if has_search {
+        let search = Paragraph::new(Line::from(vec![
+            Span::styled(" /", theme::key_hint()),
+            Span::styled(search_query, theme::search_input()),
+            Span::styled("█", theme::search_input()),
+            Span::styled(
+                format!(" ({}/{})", filtered_versions.len(), versions.len()),
+                theme::muted(),
+            ),
+        ]));
+        f.render_widget(search, chunks[0]);
+    }
 
     let hint = Paragraph::new(Line::from(vec![
         Span::styled(" j/k", theme::key_hint()),
@@ -60,23 +116,26 @@ fn render_version_picker(f: &mut Frame, tool: &str, versions: &[String], selecte
         Span::styled("Enter", theme::key_hint()),
         Span::styled(" confirm  ", theme::key_desc()),
         Span::styled("Esc", theme::key_hint()),
-        Span::styled(" cancel", theme::key_desc()),
+        Span::styled(" cancel  ", theme::key_desc()),
+        Span::styled("type", theme::key_hint()),
+        Span::styled(" filter", theme::key_desc()),
     ]));
-    f.render_widget(hint, chunks[0]);
+    f.render_widget(hint, chunks[1]);
 
-    let items: Vec<ListItem> = versions
+    let items: Vec<ListItem> = filtered_versions
         .iter()
+        .filter_map(|&i| versions.get(i))
         .map(|v| ListItem::new(Span::styled(format!("  {v}"), theme::table_row())))
         .collect();
 
     let list = List::new(items).highlight_style(theme::table_selected());
     let mut state = ListState::default();
     state.select(Some(selected));
-    f.render_stateful_widget(list, chunks[1], &mut state);
+    f.render_stateful_widget(list, chunks[2], &mut state);
 }
 
 fn render_confirm(f: &mut Frame, message: &str) {
-    let area = centered_rect(44, 7, f.area());
+    let area = centered_rect(50, 7, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -124,8 +183,46 @@ fn render_progress(f: &mut Frame, message: &str, spinner: char) {
     f.render_widget(paragraph, area);
 }
 
+fn render_tool_detail(f: &mut Frame, tool_name: &str, info: &str, scroll: usize) {
+    let area = centered_rect(60, 22, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(Span::styled(
+            format!(" {tool_name} "),
+            theme::title(),
+        ))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::popup_border())
+        .style(theme::popup_bg());
+
+    let lines: Vec<Line> = info
+        .lines()
+        .map(|l| {
+            // Highlight JSON keys
+            if let Some(colon_pos) = l.find(':') {
+                let key = &l[..colon_pos];
+                let val = &l[colon_pos..];
+                Line::from(vec![
+                    Span::styled(format!("  {key}"), theme::title()),
+                    Span::styled(val, theme::table_row()),
+                ])
+            } else {
+                Line::from(Span::styled(format!("  {l}"), theme::table_row()))
+            }
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll as u16, 0));
+    f.render_widget(paragraph, area);
+}
+
 fn render_help(f: &mut Frame) {
-    let area = centered_rect(50, 20, f.area());
+    let area = centered_rect(54, 26, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -143,13 +240,19 @@ fn render_help(f: &mut Frame) {
         "    Tab          Next tab",
         "    Shift+Tab    Previous tab",
         "    PgUp/PgDn    Scroll by 10",
+        "    Mouse scroll Navigate lists",
         "",
         "  Actions",
         "    /            Search (all tabs)",
         "    i            Install (Registry)",
-        "    u            Update (Tools)",
+        "    u            Update/Upgrade (Tools/Outdated)",
+        "    U            Use global (Registry) / Upgrade all",
         "    d            Uninstall (Tools)",
-        "    Enter        Confirm",
+        "    Enter        Detail (Tools) / Run (Tasks)",
+        "    r            Refresh all data",
+        "    p            Prune unused versions",
+        "    t            Trust config (Config)",
+        "    s            Cycle sort column/order",
         "    Esc          Cancel / Close popup",
         "    q            Quit",
         "    ?            This help",

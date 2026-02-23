@@ -1,4 +1,7 @@
-use crate::model::{ConfigFile, InstalledTool, RegistryEntry};
+use crate::model::{
+    ConfigFile, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool, PruneCandidate,
+    RegistryEntry,
+};
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -25,13 +28,32 @@ pub enum Action {
     ConfigLoaded(Vec<ConfigFile>),
     DoctorLoaded(Vec<String>),
     VersionsLoaded(Vec<String>),
+    OutdatedLoaded(Vec<OutdatedTool>),
+    TasksLoaded(Vec<MiseTask>),
+    EnvLoaded(Vec<EnvVar>),
+    SettingsLoaded(Vec<MiseSetting>),
+    PruneLoaded(Vec<PruneCandidate>),
+    ToolInfoLoaded(String),
 
     // Operations
     InstallTool,
     UninstallTool,
     UpdateTool,
-    ConfirmAction,
+    Confirm,
     CancelPopup,
+    UpgradeAll,
+    RunTask,
+    UseTool,
+    PruneTool,
+    Refresh,
+    TrustConfig,
+    ShowToolDetail,
+    CycleSortOrder,
+
+    // Mouse / popup search
+    MouseClick { x: u16, y: u16 },
+    PopupSearchInput(char),
+    PopupSearchBackspace,
 
     // Status
     OperationComplete(String),

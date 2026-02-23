@@ -1,5 +1,5 @@
 use crate::action::Action;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -61,6 +61,17 @@ fn map_event(event: Event) -> Option<Action> {
         Event::Key(KeyEvent {
             code, modifiers, ..
         }) => map_key(code, modifiers),
+        Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::ScrollUp => Some(Action::MoveUp),
+            MouseEventKind::ScrollDown => Some(Action::MoveDown),
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                Some(Action::MouseClick {
+                    x: mouse.column,
+                    y: mouse.row,
+                })
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -83,7 +94,7 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
         KeyCode::PageUp => Some(Action::PageUp),
         KeyCode::PageDown => Some(Action::PageDown),
         KeyCode::Backspace => Some(Action::SearchBackspace),
-        KeyCode::Enter => Some(Action::ConfirmAction),
+        KeyCode::Enter => Some(Action::Confirm),
         KeyCode::Esc => Some(Action::CancelPopup),
         KeyCode::Char(c) => Some(Action::SearchInput(c)),
         _ => None,

@@ -4,7 +4,6 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
-use std::collections::HashSet;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = if app.search_active {
@@ -19,7 +18,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             .split(area)
     };
 
-    // Search bar
     if app.search_active {
         let search_block = Block::default()
             .title(Span::styled(" Search ", theme::title()))
@@ -40,12 +38,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let content_area = chunks[1];
 
-    let count = app.filtered_registry.len();
-    let total = app.registry.len();
+    let count = app.filtered_settings.len();
+    let total = app.settings.len();
     let title = if app.search_active && !app.search_query.is_empty() {
-        format!(" Registry ({count}/{total}) ")
+        format!(" Settings ({count}/{total}) ")
     } else {
-        format!(" Registry ({total}) ")
+        format!(" Settings ({total}) ")
     };
 
     let block = Block::default()
@@ -55,71 +53,50 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .border_style(theme::border_focused())
         .style(ratatui::style::Style::default().bg(theme::BG));
 
-    if app.registry_state == LoadState::Loading {
+    if app.settings_state == LoadState::Loading {
         let spinner = app.spinner_char();
-        let loading = Paragraph::new(format!("  {spinner} Loading registry..."))
+        let loading = Paragraph::new(format!("  {spinner} Loading settings..."))
             .style(theme::muted())
             .block(block);
         f.render_widget(loading, content_area);
         return;
     }
 
-    let entries = app.visible_registry_entries();
-    if entries.is_empty() {
-        let empty = Paragraph::new("  No matching tools")
-            .style(theme::muted())
-            .block(block);
+    let settings = app.visible_settings();
+    if settings.is_empty() {
+        let msg = if app.search_active && !app.search_query.is_empty() {
+            "  No matching settings"
+        } else {
+            "  No settings found"
+        };
+        let empty = Paragraph::new(msg).style(theme::muted()).block(block);
         f.render_widget(empty, content_area);
         return;
     }
 
-    // Build set of installed tool names for checkmark display
-    let installed_names: HashSet<&str> = app.tools.iter().map(|t| t.name.as_str()).collect();
-
     let header = Row::new(vec![
-        Cell::from(""),
-        Cell::from(format!("Name{}", app.sort_indicator(0))),
-        Cell::from("Backend"),
-        Cell::from("Aliases"),
-        Cell::from(format!("Description{}", app.sort_indicator(1))),
+        Cell::from(format!("Key{}", app.sort_indicator(0))),
+        Cell::from(format!("Value{}", app.sort_indicator(1))),
+        Cell::from(format!("Type{}", app.sort_indicator(2))),
     ])
     .style(theme::table_header());
 
-    let rows: Vec<Row> = entries
+    let rows: Vec<Row> = settings
         .iter()
-        .map(|entry| {
-            let status_icon = if installed_names.contains(entry.short.as_str()) {
-                Cell::from(Span::styled("✓", theme::active_indicator()))
-            } else {
-                Cell::from("")
-            };
-
-            let backend = entry.backends.first().map(|b| b.as_str()).unwrap_or("");
-            let aliases = entry.aliases.join(", ");
-            let desc = entry
-                .description
-                .as_deref()
-                .unwrap_or("")
-                .chars()
-                .take(60)
-                .collect::<String>();
-
+        .map(|setting| {
+            let value_truncated: String = setting.value.chars().take(60).collect();
             Row::new(vec![
-                status_icon,
-                Cell::from(Span::styled(&entry.short[..], theme::table_row())),
-                Cell::from(Span::styled(backend, theme::muted())),
-                Cell::from(Span::styled(aliases, theme::muted())),
-                Cell::from(Span::styled(desc, theme::muted())),
+                Cell::from(Span::styled(&setting.key[..], theme::table_row())),
+                Cell::from(Span::styled(value_truncated, theme::table_row())),
+                Cell::from(Span::styled(&setting.value_type[..], theme::muted())),
             ])
         })
         .collect();
 
     let widths = [
-        Constraint::Length(3),
-        Constraint::Length(20),
-        Constraint::Length(16),
-        Constraint::Length(16),
+        Constraint::Length(30),
         Constraint::Min(20),
+        Constraint::Length(10),
     ];
 
     let table = Table::new(rows, widths)
@@ -128,6 +105,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .row_highlight_style(theme::table_selected());
 
     let mut state = TableState::default();
-    state.select(Some(app.registry_selected));
+    state.select(Some(app.settings_selected));
     f.render_stateful_widget(table, content_area, &mut state);
 }

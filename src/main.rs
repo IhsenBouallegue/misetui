@@ -8,7 +8,7 @@ mod tui;
 mod ui;
 
 use action::Action;
-use app::App;
+use app::{App, Popup};
 use color_eyre::Result;
 use event::EventHandler;
 use tokio::sync::mpsc;
@@ -33,7 +33,9 @@ async fn main() -> Result<()> {
         // Wait for next event or action
         tokio::select! {
             Some(event_action) = events.next() => {
-                let action = if app.search_active && app.popup.is_none() {
+                let action = if is_version_picker_active(&app) {
+                    remap_version_picker_action(event_action)
+                } else if app.search_active && app.popup.is_none() {
                     remap_search_action(event_action)
                 } else {
                     remap_normal_action(event_action)
@@ -54,6 +56,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn is_version_picker_active(app: &App) -> bool {
+    matches!(app.popup, Some(Popup::VersionPicker { .. }))
+}
+
 /// In normal mode, map char inputs to their bound actions
 fn remap_normal_action(action: Action) -> Action {
     match action {
@@ -68,8 +74,15 @@ fn remap_normal_action(action: Action) -> Action {
             'u' => Action::UpdateTool,
             'd' => Action::UninstallTool,
             '?' => Action::ShowHelp,
+            'r' => Action::Refresh,
+            'U' => Action::UseTool,
+            'p' => Action::PruneTool,
+            't' => Action::TrustConfig,
+            's' => Action::CycleSortOrder,
             _ => action, // unbound chars pass through to auto-start search
         },
+        // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
+        other @ Action::Confirm => other,
         other => other,
     }
 }
@@ -78,9 +91,25 @@ fn remap_normal_action(action: Action) -> Action {
 fn remap_search_action(action: Action) -> Action {
     match action {
         Action::SearchInput(_) => action, // all chars pass through
-        Action::ConfirmAction => Action::ExitSearch, // Enter exits search
+        Action::Confirm => Action::ExitSearch, // Enter exits search
         Action::CancelPopup => Action::CancelPopup,  // Esc exits search
         Action::SearchBackspace => action,
         _ => Action::None, // ignore navigation/actions in search mode
+    }
+}
+
+/// In version picker mode, route chars to popup search, keep navigation
+fn remap_version_picker_action(action: Action) -> Action {
+    match action {
+        Action::SearchInput(c) => match c {
+            'j' => Action::MoveDown,
+            'k' => Action::MoveUp,
+            _ => Action::PopupSearchInput(c),
+        },
+        Action::SearchBackspace => Action::PopupSearchBackspace,
+        Action::Confirm => Action::Confirm,
+        Action::CancelPopup => Action::CancelPopup,
+        Action::MoveUp | Action::MoveDown | Action::PageUp | Action::PageDown => action,
+        _ => Action::None,
     }
 }

@@ -1,4 +1,7 @@
-use crate::model::{ConfigFile, InstalledTool, InstalledToolVersion, RegistryEntry};
+use crate::model::{
+    ConfigFile, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseSetting, MiseTask,
+    OutdatedEntry, OutdatedTool, PruneCandidate, RegistryEntry,
+};
 use std::collections::BTreeMap;
 use tokio::process::Command;
 
@@ -72,4 +75,111 @@ pub async fn uninstall_tool(tool: &str, version: &str) -> Result<String, String>
 pub async fn update_tool(tool: &str) -> Result<String, String> {
     run_mise(&["upgrade", tool]).await?;
     Ok(format!("Updated {tool}"))
+}
+
+pub async fn fetch_outdated() -> Result<Vec<OutdatedTool>, String> {
+    let json = run_mise(&["outdated", "-J"]).await?;
+    let map: BTreeMap<String, OutdatedEntry> =
+        serde_json::from_str(&json).map_err(|e| format!("Parse error: {e}"))?;
+    Ok(OutdatedTool::from_map(map))
+}
+
+pub async fn fetch_tasks() -> Result<Vec<MiseTask>, String> {
+    let json = run_mise(&["tasks", "ls", "-J"]).await?;
+    let tasks: Vec<MiseTask> =
+        serde_json::from_str(&json).map_err(|e| format!("Parse error: {e}"))?;
+    Ok(tasks)
+}
+
+pub async fn fetch_env() -> Result<Vec<EnvVar>, String> {
+    let json = run_mise(&["env", "--json-extended"]).await?;
+    let map: BTreeMap<String, EnvVarEntry> =
+        serde_json::from_str(&json).map_err(|e| format!("Parse error: {e}"))?;
+    Ok(EnvVar::from_map(map))
+}
+
+pub async fn fetch_settings() -> Result<Vec<MiseSetting>, String> {
+    let json = run_mise(&["settings", "ls", "-J", "--all"]).await?;
+    let value: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| format!("Parse error: {e}"))?;
+    Ok(MiseSetting::from_json(value))
+}
+
+pub async fn upgrade_tool(tool: &str) -> Result<String, String> {
+    run_mise(&["upgrade", tool]).await?;
+    Ok(format!("Upgraded {tool}"))
+}
+
+pub async fn upgrade_all() -> Result<String, String> {
+    run_mise(&["upgrade"]).await?;
+    Ok("Upgraded all tools".to_string())
+}
+
+pub async fn run_task(task: &str) -> Result<String, String> {
+    run_mise(&["run", task]).await?;
+    Ok(format!("Task '{task}' completed"))
+}
+
+pub async fn use_tool(tool: &str, version: &str) -> Result<String, String> {
+    let tool_ver = format!("{tool}@{version}");
+    run_mise(&["use", "--global", &tool_ver]).await?;
+    Ok(format!("Now using {tool_ver}"))
+}
+
+pub async fn prune_dry_run() -> Result<Vec<PruneCandidate>, String> {
+    let output = Command::new("mise")
+        .args(["prune", "--dry-run"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise prune: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let candidates: Vec<PruneCandidate> = stdout
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            // Parse lines like "node@18.0.0" or "node 18.0.0"
+            if let Some((tool, version)) = line.split_once('@') {
+                Some(PruneCandidate {
+                    tool: tool.trim().to_string(),
+                    version: version.trim().to_string(),
+                })
+            } else if let Some((tool, version)) = line.split_once(' ') {
+                Some(PruneCandidate {
+                    tool: tool.trim().to_string(),
+                    version: version.trim().to_string(),
+                })
+            } else {
+                Some(PruneCandidate {
+                    tool: line.to_string(),
+                    version: String::new(),
+                })
+            }
+        })
+        .collect();
+    Ok(candidates)
+}
+
+pub async fn prune() -> Result<String, String> {
+    run_mise(&["prune", "-y"]).await?;
+    Ok("Pruned unused tool versions".to_string())
+}
+
+pub async fn trust_config(path: &str) -> Result<String, String> {
+    run_mise(&["trust", path]).await?;
+    Ok(format!("Trusted {path}"))
+}
+
+#[allow(dead_code)]
+pub async fn untrust_config(path: &str) -> Result<String, String> {
+    run_mise(&["trust", "--untrust", path]).await?;
+    Ok(format!("Untrusted {path}"))
+}
+
+pub async fn fetch_tool_info(tool: &str) -> Result<String, String> {
+    // Returns raw JSON string for display in popup
+    run_mise(&["tool", tool, "-J"]).await
 }

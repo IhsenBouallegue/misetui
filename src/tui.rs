@@ -1,5 +1,6 @@
 use color_eyre::Result;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -9,7 +10,7 @@ use std::io::{self, stdout};
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
 pub fn init() -> Result<Tui> {
-    execute!(stdout(), EnterAlternateScreen)?;
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout());
     let terminal = Terminal::new(backend)?;
@@ -25,6 +26,6 @@ pub fn init() -> Result<Tui> {
 
 pub fn restore() -> Result<()> {
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+    execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }

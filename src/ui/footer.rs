@@ -13,19 +13,34 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         ("j/k", "navigate"),
         ("?", "help"),
         ("type", "to search"),
+        ("r", "refresh"),
+        ("s", "sort"),
     ];
 
     match app.tab {
         Tab::Tools => {
             hints.push(("u", "update"));
             hints.push(("d", "uninstall"));
+            hints.push(("Enter", "detail"));
         }
         Tab::Registry => {
             hints.push(("i", "install"));
+            hints.push(("U", "use global"));
         }
-        Tab::Config => {}
-        Tab::Doctor => {}
+        Tab::Outdated => {
+            hints.push(("u", "upgrade"));
+            hints.push(("U", "upgrade all"));
+        }
+        Tab::Tasks => {
+            hints.push(("Enter", "run task"));
+        }
+        Tab::Config => {
+            hints.push(("t", "trust"));
+        }
+        Tab::Environment | Tab::Settings | Tab::Doctor => {}
     }
+
+    hints.push(("p", "prune"));
 
     if app.search_active {
         hints = vec![("Esc", "cancel search"), ("Type", "to filter")];

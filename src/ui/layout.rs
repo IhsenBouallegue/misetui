@@ -21,7 +21,7 @@ impl AppLayout {
         let body = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(14), // sidebar
+                Constraint::Length(16), // sidebar
                 Constraint::Min(20),   // content
             ])
             .split(vertical[1]);
