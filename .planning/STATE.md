@@ -9,28 +9,29 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 
 ## Current Position
 
-Phase: 2 of 4 (Drift Indicator)
-Plan: 3 of 3 in current phase
-Status: Phase Complete
-Last activity: 2026-02-23 — Completed 02-03-PLAN.md (Filesystem watcher for drift indicator)
+Phase: 1 of 4 (Projects Tab) — completing out-of-order; Phase 2 (Drift Indicator) already done
+Plan: 2 of 3 complete in phase 01
+Status: In Progress (01-03 remaining)
+Last activity: 2026-02-23 — Completed 01-02-PLAN.md (App integration for Projects tab)
 
-Progress: [███░░░░░░░] 30%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 2.3 min
-- Total execution time: 7 min
+- Total plans completed: 4
+- Average duration: 2 min
+- Total execution time: 8 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
+| 01-projects-tab | 2 | 2 min | 1 min |
 | 02-drift-indicator | 3 | 7 min | 2.3 min |
 
 **Recent Trend:**
-- Last 5 plans: 1 min (02-01), 2 min (02-02), 4 min (02-03)
+- Last 5 plans: 1 min (01-01), 10 min (01-02), 1 min (02-01), 2 min (02-02), 4 min (02-03)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -52,6 +53,7 @@ Recent decisions affecting current work:
 - [Phase 02-drift-indicator plan 02]: drift_style uses theme::GREEN/YELLOW color constants directly (no success()/warning() in theme.rs)
 - [Phase 02-drift-indicator plan 03]: Arc<Mutex<Receiver>> used to bridge std::sync::mpsc into tokio::task::spawn_blocking — safe, idiomatic pattern for notify+tokio integration
 - [Phase 02-drift-indicator plan 03]: Phase 01 compile stubs (update_filtered_projects, install_project_tools, update_project_pins, Tab::Projects UI) completed as Rule 3 auto-fixes
+- [Phase 01-projects-tab plan 02]: Tab::Projects at index 7, Doctor shifts to 8; projects_drill_active flag for drill-down navigation; dual-field fuzzy search (name+path, best score, name highlights); JumpToDriftProject now navigates to Tab::Projects directly
 
 ### Pending Todos
 
@@ -64,5 +66,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 02-drift-indicator-02-03-PLAN.md (Phase 02 complete)
+Stopped at: Completed 01-projects-tab-01-02-PLAN.md (App integration for Projects tab)
 Resume file: None

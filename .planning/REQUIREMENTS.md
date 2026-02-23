@@ -10,10 +10,10 @@
 - [x] **PROJ-01**: User can see a health dashboard listing all projects found in configured scan directories, showing name, path, tool count, health status, and last-seen date
 - [x] **PROJ-02**: User can configure scan directories and max depth via `~/.config/misetui/config.toml`; default to `~/projects` and CWD when no config exists
 - [x] **PROJ-03**: User can drill into a selected project to see a per-tool breakdown of required version vs installed version and health status
-- [ ] **PROJ-04**: User can install all missing tools for a selected project with `i`
-- [ ] **PROJ-05**: User can update all outdated tool pins for a selected project with `u`
-- [ ] **PROJ-06**: User can fuzzy-search project names and paths with `/`
-- [ ] **PROJ-07**: User can rescan projects with `r`
+- [x] **PROJ-04**: User can install all missing tools for a selected project with `i`
+- [x] **PROJ-05**: User can update all outdated tool pins for a selected project with `u`
+- [x] **PROJ-06**: User can fuzzy-search project names and paths with `/`
+- [x] **PROJ-07**: User can rescan projects with `r`
 
 ### Drift Indicator
 
@@ -80,10 +80,10 @@
 | PROJ-01 | Phase 1 | Complete |
 | PROJ-02 | Phase 1 | Complete |
 | PROJ-03 | Phase 1 | Complete |
-| PROJ-04 | Phase 1 | Pending |
-| PROJ-05 | Phase 1 | Pending |
-| PROJ-06 | Phase 1 | Pending |
-| PROJ-07 | Phase 1 | Pending |
+| PROJ-04 | Phase 1 | Complete |
+| PROJ-05 | Phase 1 | Complete |
+| PROJ-06 | Phase 1 | Complete |
+| PROJ-07 | Phase 1 | Complete |
 | DRFT-01 | Phase 2 | Complete |
 | DRFT-02 | Phase 2 | Complete |
 | DRFT-03 | Phase 2 | Complete |
