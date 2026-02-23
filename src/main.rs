@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod config;
 mod event;
 mod mise;
 mod model;
