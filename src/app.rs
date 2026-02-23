@@ -1,8 +1,8 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
-
-    ConfigFile, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool, RegistryEntry,
+    ConfigFile, DriftState, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool,
+    RegistryEntry,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -180,6 +180,9 @@ pub struct App {
     // Spinner
     pub spinner_frame: usize,
 
+    // Drift indicator state
+    pub drift_state: DriftState,
+
     // Action channel for async operations
     pub action_tx: mpsc::UnboundedSender<Action>,
 }
@@ -246,6 +249,7 @@ impl App {
             pending_use_global: false,
             status_message: None,
             spinner_frame: 0,
+            drift_state: DriftState::Checking,
             action_tx,
         }
     }
@@ -305,6 +309,12 @@ impl App {
             if let Ok(settings) = mise::fetch_settings().await {
                 let _ = tx.send(Action::SettingsLoaded(settings));
             }
+        });
+
+        let tx = self.action_tx.clone();
+        tokio::spawn(async move {
+            let state = mise::check_cwd_drift().await.unwrap_or(DriftState::NoConfig);
+            let _ = tx.send(Action::DriftChecked(state));
         });
     }
 
@@ -965,6 +975,26 @@ impl App {
                         *ttl -= 1;
                     }
                 }
+            }
+
+            Action::DriftChecked(state) => {
+                self.drift_state = state;
+            }
+            Action::CheckDrift => {
+                self.drift_state = DriftState::Checking;
+                let tx = self.action_tx.clone();
+                tokio::spawn(async move {
+                    let state = mise::check_cwd_drift().await.unwrap_or(DriftState::NoConfig);
+                    let _ = tx.send(Action::DriftChecked(state));
+                });
+            }
+            Action::JumpToDriftProject => {
+                // Phase 2: navigate to Projects tab if it exists; otherwise show hint.
+                // When Phase 1 adds Tab::Projects, update this arm to set self.tab = Tab::Projects.
+                self.status_message = Some((
+                    "Press r on the Projects tab to see CWD health detail.".to_string(),
+                    20,
+                ));
             }
 
             Action::Render | Action::None => {}

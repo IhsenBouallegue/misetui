@@ -1,6 +1,6 @@
 use crate::model::{
-    ConfigFile, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool, PruneCandidate,
-    RegistryEntry,
+    ConfigFile, DriftState, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool,
+    PruneCandidate, RegistryEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,11 @@ pub enum Action {
     SettingsLoaded(Vec<MiseSetting>),
     PruneLoaded(Vec<PruneCandidate>),
     ToolInfoLoaded(String),
+
+    // Drift indicator
+    CheckDrift,
+    DriftChecked(DriftState),
+    JumpToDriftProject,
 
     // Operations
     InstallTool,
