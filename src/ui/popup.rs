@@ -40,6 +40,9 @@ pub fn render(f: &mut Frame, app: &App) {
             scroll,
         } => render_tool_detail(f, tool_name, info, *scroll),
         Popup::Help => render_help(f),
+        Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth } => {
+            render_scan_config(f, dirs, *selected, *adding, new_dir, *max_depth)
+        }
     }
 }
 
@@ -253,6 +256,7 @@ fn render_help(f: &mut Frame) {
         "    p            Prune unused versions",
         "    t            Trust config (Config)",
         "    s            Cycle sort column/order",
+        "    c            Edit scan config (Projects)",
         "    Esc          Cancel / Close popup",
         "    q            Quit",
         "    ?            This help",
@@ -271,4 +275,100 @@ fn render_help(f: &mut Frame) {
 
     let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+}
+
+fn render_scan_config(
+    f: &mut Frame,
+    dirs: &[String],
+    selected: usize,
+    adding: bool,
+    new_dir: &str,
+    max_depth: usize,
+) {
+    // Height: 3 (border+title+depth) + dirs.len() + 1 (add row) + 2 (hints) + padding
+    let height = (dirs.len() as u16 + 8).max(12).min(28);
+    let area = centered_rect(58, height, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(Span::styled(" Scan Config ", theme::title()))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::popup_border())
+        .style(theme::popup_bg());
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Layout: depth row | blank | dir list | add row | blank | hints
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // max_depth
+            Constraint::Length(1), // blank
+            Constraint::Min(1),    // dir list
+            Constraint::Length(1), // add row / input
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // hints
+        ])
+        .split(inner);
+
+    // Max depth row
+    let depth_line = Line::from(vec![
+        Span::styled("  max_depth: ", theme::key_desc()),
+        Span::styled(max_depth.to_string(), theme::title()),
+        Span::styled("   (-/+ to change)", theme::muted()),
+    ]);
+    f.render_widget(Paragraph::new(depth_line), chunks[0]);
+
+    // Dir list
+    let items: Vec<ListItem> = dirs
+        .iter()
+        .map(|d| ListItem::new(Span::styled(format!("  {d}"), theme::table_row())))
+        .collect();
+
+    if items.is_empty() {
+        let empty = Paragraph::new(Span::styled(
+            "  (no scan dirs — add one with a)",
+            theme::muted(),
+        ));
+        f.render_widget(empty, chunks[2]);
+    } else {
+        let list = List::new(items)
+            .highlight_style(theme::table_selected())
+            .highlight_symbol("▶ ");
+        let mut state = ListState::default();
+        state.select(Some(selected));
+        f.render_stateful_widget(list, chunks[2], &mut state);
+    }
+
+    // Add row / text input
+    if adding {
+        let add_row = Line::from(vec![
+            Span::styled("  + ", theme::key_hint()),
+            Span::styled(new_dir, theme::search_input()),
+            Span::styled("█", theme::search_input()),
+            Span::styled("  (Enter to add, Esc to cancel)", theme::muted()),
+        ]);
+        f.render_widget(Paragraph::new(add_row), chunks[3]);
+    } else {
+        let add_hint = Paragraph::new(Span::styled(
+            "  a add dir   d delete   Enter save   Esc cancel",
+            theme::muted(),
+        ));
+        f.render_widget(add_hint, chunks[3]);
+    }
+
+    // Bottom hint
+    let hint = Line::from(vec![
+        Span::styled("  j/k", theme::key_hint()),
+        Span::styled(" navigate  ", theme::key_desc()),
+        Span::styled("-/+", theme::key_hint()),
+        Span::styled(" depth  ", theme::key_desc()),
+        Span::styled("Enter", theme::key_hint()),
+        Span::styled(" save  ", theme::key_desc()),
+        Span::styled("Esc", theme::key_hint()),
+        Span::styled(" cancel", theme::key_desc()),
+    ]);
+    f.render_widget(Paragraph::new(hint), chunks[5]);
 }
