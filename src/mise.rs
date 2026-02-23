@@ -194,13 +194,16 @@ pub fn scan_projects(
     config: &MisetuiConfig,
     installed_tools: &[crate::model::InstalledTool],
 ) -> Vec<MiseProject> {
-    // Build a fast lookup: tool name → active installed version
-    let mut installed_map: std::collections::HashMap<&str, &str> =
+    // Build a fast lookup: tool name → all installed versions (regardless of active state).
+    // A tool can be installed but not active when the shell is not inside that project's
+    // directory — we still want to report it as installed for the Projects health check.
+    let mut installed_map: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
     for tool in installed_tools {
-        if tool.active {
-            installed_map.insert(tool.name.as_str(), tool.version.as_str());
-        }
+        installed_map
+            .entry(tool.name.as_str())
+            .or_default()
+            .push(tool.version.as_str());
     }
 
     let mut projects = Vec::new();
@@ -220,7 +223,7 @@ fn collect_projects(
     dir: &std::path::Path,
     depth: usize,
     max_depth: usize,
-    installed_map: &std::collections::HashMap<&str, &str>,
+    installed_map: &std::collections::HashMap<&str, Vec<&str>>,
     projects: &mut Vec<MiseProject>,
 ) {
     let config_path = dir.join(".mise.toml");
@@ -256,7 +259,7 @@ fn collect_projects(
 fn parse_project(
     dir: &std::path::Path,
     config_path: &std::path::Path,
-    installed_map: &std::collections::HashMap<&str, &str>,
+    installed_map: &std::collections::HashMap<&str, Vec<&str>>,
 ) -> MiseProject {
     let name = dir
         .file_name()
@@ -316,10 +319,16 @@ fn parse_project(
     for (tool_name, required) in &tool_entries {
         let status = match installed_map.get(tool_name.as_str()) {
             None => ProjectHealthStatus::Missing,
-            Some(installed_ver) => {
-                // Simple version match: if required is "latest" or matches installed, healthy.
-                // Otherwise mark outdated.
-                if required == "latest" || *installed_ver == required.as_str() {
+            Some(versions) => {
+                // Check if any installed version satisfies the requirement.
+                // "latest" always satisfies. Exact match satisfies. Fuzzy prefix satisfies
+                // (e.g. required "3.12" is satisfied by installed "3.12.12").
+                let satisfied = required == "latest"
+                    || versions.iter().any(|v| {
+                        *v == required.as_str()
+                            || v.starts_with(&format!("{}.", required))
+                    });
+                if satisfied {
                     ProjectHealthStatus::Healthy
                 } else {
                     ProjectHealthStatus::Outdated
@@ -336,10 +345,21 @@ fn parse_project(
             _ => {}
         }
 
+        // Display the best-matching installed version (exact match first, else first available).
         let installed = installed_map
             .get(tool_name.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+            .and_then(|versions| {
+                versions
+                    .iter()
+                    .find(|v| {
+                        **v == required.as_str()
+                            || v.starts_with(&format!("{}.", required))
+                    })
+                    .or_else(|| versions.first())
+                    .copied()
+            })
+            .unwrap_or("")
+            .to_string();
 
         tool_healths.push(ProjectToolHealth {
             tool: tool_name.clone(),
