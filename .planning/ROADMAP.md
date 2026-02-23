@@ -12,7 +12,7 @@ This milestone transforms misetui from a read-only mise browser into a full proj
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Projects Tab** - Multi-project health dashboard with drill-down and install/update actions
+- [x] **Phase 1: Projects Tab** - Multi-project health dashboard with drill-down and install/update actions (completed 2026-02-23)
 - [x] **Phase 2: Drift Indicator** - Persistent header-bar indicator with live filesystem watch (completed 2026-02-23)
 - [ ] **Phase 3: Bootstrap Wizard** - Guided .mise.toml generator with auto-detection and install
 - [ ] **Phase 4: Inline Editor** - Structured TOML editor with atomic writes and toml_edit round-trip
@@ -83,7 +83,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Projects Tab | 4/5 | In Progress|  |
+| 1. Projects Tab | 4/5 | Complete    | 2026-02-23 |
 | 2. Drift Indicator | 3/3 | Complete    | 2026-02-23 |
 | 3. Bootstrap Wizard | 0/TBD | Not started | - |
 | 4. Inline Editor | 0/TBD | Not started | - |
