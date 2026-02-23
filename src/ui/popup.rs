@@ -43,9 +43,6 @@ pub fn render(f: &mut Frame, app: &App) {
         Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth } => {
             render_scan_config(f, dirs, *selected, *adding, new_dir, *max_depth)
         }
-        Popup::Editor(ref state) => {
-            super::editor::render_editor(f, state);
-        }
     }
 }
 
@@ -253,14 +250,16 @@ fn render_help(f: &mut Frame) {
         "    i            Install (Registry)",
         "    u            Update/Upgrade (Tools/Outdated)",
         "    U            Use global (Registry) / Upgrade all",
-        "    d            Uninstall (Tools)",
-        "    Enter        Detail (Tools) / Run (Tasks)",
+        "    Enter        Edit inline / Drill-down",
+        "    v            Detail (Tools)",
+        "    a            Add to config",
+        "    d            Delete from config",
+        "    w            Write config changes",
         "    r            Refresh all data",
         "    p            Prune unused versions",
         "    t            Trust config (Config)",
         "    s            Cycle sort column/order",
         "    c            Edit scan config (Projects)",
-        "    e            Edit config (Config/Projects)",
         "    Esc          Cancel / Close popup",
         "    q            Quit",
         "    ?            This help",

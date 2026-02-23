@@ -1,7 +1,6 @@
 mod config;
 pub(super) mod highlight;
 mod doctor;
-pub(crate) mod editor;
 mod environment;
 mod footer;
 mod header;

@@ -1,9 +1,9 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
-    ConfigFile, DriftState, EditorEnvRow, EditorRowStatus, EditorState, EditorTab, EditorTaskRow,
-    EditorToolRow, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
-    RegistryEntry, WizardState, WizardStep,
+    ConfigFile, DriftState, EditorEnvRow, EditorRowStatus, EditorState, EditorTaskRow,
+    EditorToolRow, EnvVar, InlineEdit, InstalledTool, MiseProject, MiseSetting, MiseTask,
+    OutdatedTool, RegistryEntry, WizardState, WizardStep,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -110,7 +110,6 @@ pub enum Popup {
         /// Working copy of max_depth being edited.
         max_depth: usize,
     },
-    Editor(Box<EditorState>),
 }
 
 #[derive(Debug, Clone)]
@@ -119,8 +118,6 @@ pub enum ConfirmAction {
     Prune,
     TrustConfig { path: String },
     RunTask { task: String },
-    /// User confirmed discarding unsaved editor changes
-    DiscardEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +214,11 @@ pub struct App {
     // Bootstrap wizard state (lives on App, rendered as tab content)
     pub wizard: WizardState,
 
+    // Inline editor state (loaded per config file at startup)
+    pub editor_states: Vec<EditorState>,
+    pub editor_states_loaded: bool,
+    pub inline_editing: Option<InlineEdit>,
+
     // Action channel for async operations
     pub action_tx: mpsc::UnboundedSender<Action>,
 }
@@ -303,6 +305,9 @@ impl App {
                 write_agent_files: false,
                 preview_scroll: 0,
             },
+            editor_states: Vec::new(),
+            editor_states_loaded: false,
+            inline_editing: None,
             action_tx,
         }
     }
@@ -370,351 +375,40 @@ impl App {
             let _ = tx.send(Action::DriftChecked(state));
         });
 
+        let tx = self.action_tx.clone();
+        tokio::spawn(async move {
+            let states = mise::fetch_editor_states().await;
+            let _ = tx.send(Action::EditorStatesLoaded(states));
+        });
+
         // Projects are scanned in the ToolsLoaded handler once the tools list is populated.
     }
 
     pub fn handle_action(&mut self, action: Action) {
-        // Editor popup intercept — handles all editor-mode actions before normal routing
-        if let Some(Popup::Editor(ref mut state)) = &mut self.popup {
+        // Inline editing intercept — when user is typing into a cell, block all other actions
+        if self.inline_editing.is_some() {
             match &action {
-                Action::MoveUp => {
-                    if !state.editing {
-                        if state.selected > 0 { state.selected -= 1; }
-                    }
-                    return;
-                }
-                Action::MoveDown => {
-                    if !state.editing {
-                        let len = match state.tab {
-                            EditorTab::Tools => state.tools.len(),
-                            EditorTab::Env => state.env_vars.len(),
-                            EditorTab::Tasks => state.tasks.len(),
-                        };
-                        if len > 0 && state.selected + 1 < len { state.selected += 1; }
-                    }
-                    return;
-                }
-                Action::PageUp => {
-                    if !state.editing {
-                        state.selected = state.selected.saturating_sub(10);
-                    }
-                    return;
-                }
-                Action::PageDown => {
-                    if !state.editing {
-                        let len = match state.tab {
-                            EditorTab::Tools => state.tools.len(),
-                            EditorTab::Env => state.env_vars.len(),
-                            EditorTab::Tasks => state.tasks.len(),
-                        };
-                        if len > 0 { state.selected = (state.selected + 10).min(len - 1); }
-                    }
-                    return;
-                }
-                Action::EditorSwitchTab => {
-                    if !state.editing {
-                        state.tab = match state.tab {
-                            EditorTab::Tools => EditorTab::Env,
-                            EditorTab::Env => EditorTab::Tasks,
-                            EditorTab::Tasks => EditorTab::Tools,
-                        };
-                        state.selected = 0;
-                    }
-                    return;
-                }
-                Action::EditorStartEdit => {
-                    if !state.editing {
-                        let has_row = match state.tab {
-                            EditorTab::Tools => !state.tools.is_empty(),
-                            EditorTab::Env => !state.env_vars.is_empty(),
-                            EditorTab::Tasks => !state.tasks.is_empty(),
-                        };
-                        if has_row {
-                            state.editing = true;
-                            state.edit_column = 1; // version/value/command column
-                            state.edit_buffer = match state.tab {
-                                EditorTab::Tools => state.tools[state.selected].version.clone(),
-                                EditorTab::Env => state.env_vars[state.selected].value.clone(),
-                                EditorTab::Tasks => state.tasks[state.selected].command.clone(),
-                            };
-                        }
-                    }
-                    return;
-                }
-                Action::EditorConfirmEdit => {
-                    if state.editing {
-                        let buf = state.edit_buffer.clone();
-                        let col = state.edit_column;
-                        match state.tab {
-                            EditorTab::Tools => {
-                                if let Some(row) = state.tools.get_mut(state.selected) {
-                                    // Tools only have column 1 (version) for editing via 'e'
-                                    // Column 0 (name) is used when adding a new tool row
-                                    if col == 0 {
-                                        if row.name != buf {
-                                            row.name = buf.clone();
-                                            if row.status == EditorRowStatus::Unchanged {
-                                                row.status = EditorRowStatus::Modified;
-                                            }
-                                            state.dirty = true;
-                                        }
-                                    } else if row.version != buf {
-                                        row.version = buf.clone();
-                                        if row.status == EditorRowStatus::Unchanged {
-                                            row.status = EditorRowStatus::Modified;
-                                        }
-                                        state.dirty = true;
-                                    }
-                                }
-                            }
-                            EditorTab::Env => {
-                                if let Some(row) = state.env_vars.get_mut(state.selected) {
-                                    if col == 0 {
-                                        if row.key != buf {
-                                            row.key = buf.clone();
-                                            if row.status == EditorRowStatus::Unchanged {
-                                                row.status = EditorRowStatus::Modified;
-                                            }
-                                            state.dirty = true;
-                                        }
-                                    } else if row.value != buf {
-                                        row.value = buf.clone();
-                                        if row.status == EditorRowStatus::Unchanged {
-                                            row.status = EditorRowStatus::Modified;
-                                        }
-                                        state.dirty = true;
-                                    }
-                                }
-                            }
-                            EditorTab::Tasks => {
-                                if let Some(row) = state.tasks.get_mut(state.selected) {
-                                    if col == 0 {
-                                        if row.name != buf {
-                                            row.name = buf.clone();
-                                            if row.status == EditorRowStatus::Unchanged {
-                                                row.status = EditorRowStatus::Modified;
-                                            }
-                                            state.dirty = true;
-                                        }
-                                    } else if row.command != buf {
-                                        row.command = buf.clone();
-                                        if row.status == EditorRowStatus::Unchanged {
-                                            row.status = EditorRowStatus::Modified;
-                                        }
-                                        state.dirty = true;
-                                    }
-                                }
-                            }
-                        }
-                        // If we just finished editing column 0 (name/key) on a newly Added row,
-                        // auto-advance to column 1 (version/value/command) so user can fill it in
-                        if col == 0 {
-                            let is_added = match state.tab {
-                                EditorTab::Tools => state.tools.get(state.selected)
-                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
-                                EditorTab::Env => state.env_vars.get(state.selected)
-                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
-                                EditorTab::Tasks => state.tasks.get(state.selected)
-                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
-                            };
-                            if is_added {
-                                state.edit_column = 1;
-                                state.editing = true;
-                                state.edit_buffer = match state.tab {
-                                    EditorTab::Tools => state.tools[state.selected].version.clone(),
-                                    EditorTab::Env => state.env_vars[state.selected].value.clone(),
-                                    EditorTab::Tasks => state.tasks[state.selected].command.clone(),
-                                };
-                                return;
-                            }
-                        }
-                        state.editing = false;
-                        state.edit_buffer.clear();
-                    }
-                    return;
-                }
-                Action::EditorCancelEdit => {
-                    if state.editing {
-                        state.editing = false;
-                        state.edit_buffer.clear();
-                    }
-                    return;
-                }
                 Action::EditorInput(c) => {
-                    if state.editing {
-                        state.edit_buffer.push(*c);
+                    if let Some(ref mut edit) = self.inline_editing {
+                        edit.buffer.push(*c);
                     }
                     return;
                 }
                 Action::EditorBackspace => {
-                    if state.editing {
-                        state.edit_buffer.pop();
+                    if let Some(ref mut edit) = self.inline_editing {
+                        edit.buffer.pop();
                     }
                     return;
                 }
-                Action::EditorDeleteRow => {
-                    if !state.editing {
-                        match state.tab {
-                            EditorTab::Tools => {
-                                if let Some(row) = state.tools.get_mut(state.selected) {
-                                    if row.status == EditorRowStatus::Added {
-                                        state.tools.remove(state.selected);
-                                        if state.selected >= state.tools.len() && !state.tools.is_empty() {
-                                            state.selected = state.tools.len() - 1;
-                                        }
-                                    } else {
-                                        row.status = EditorRowStatus::Deleted;
-                                    }
-                                    state.dirty = true;
-                                }
-                            }
-                            EditorTab::Env => {
-                                if let Some(row) = state.env_vars.get_mut(state.selected) {
-                                    if row.status == EditorRowStatus::Added {
-                                        state.env_vars.remove(state.selected);
-                                        if state.selected >= state.env_vars.len() && !state.env_vars.is_empty() {
-                                            state.selected = state.env_vars.len() - 1;
-                                        }
-                                    } else {
-                                        row.status = EditorRowStatus::Deleted;
-                                    }
-                                    state.dirty = true;
-                                }
-                            }
-                            EditorTab::Tasks => {
-                                if let Some(row) = state.tasks.get_mut(state.selected) {
-                                    if row.status == EditorRowStatus::Added {
-                                        state.tasks.remove(state.selected);
-                                        if state.selected >= state.tasks.len() && !state.tasks.is_empty() {
-                                            state.selected = state.tasks.len() - 1;
-                                        }
-                                    } else {
-                                        row.status = EditorRowStatus::Deleted;
-                                    }
-                                    state.dirty = true;
-                                }
-                            }
-                        }
-                    }
+                Action::EditorConfirmEdit => {
+                    self.handle_editor_confirm_edit();
                     return;
                 }
-                Action::EditorAddTool => {
-                    if !state.editing {
-                        match state.tab {
-                            EditorTab::Tools => {
-                                // Add an empty tool row and start editing the name column
-                                state.tools.push(EditorToolRow {
-                                    name: String::new(),
-                                    version: "latest".to_string(),
-                                    status: EditorRowStatus::Added,
-                                    original_name: None,
-                                });
-                                state.selected = state.tools.len() - 1;
-                                state.editing = true;
-                                state.edit_column = 0; // editing name first
-                                state.edit_buffer.clear();
-                                state.dirty = true;
-                            }
-                            EditorTab::Env => {
-                                // 'a' on Env sub-tab also adds env var
-                                state.env_vars.push(EditorEnvRow {
-                                    key: String::new(),
-                                    value: String::new(),
-                                    status: EditorRowStatus::Added,
-                                    original_key: None,
-                                });
-                                state.selected = state.env_vars.len() - 1;
-                                state.editing = true;
-                                state.edit_column = 0;
-                                state.edit_buffer.clear();
-                                state.dirty = true;
-                            }
-                            EditorTab::Tasks => {
-                                // 'a' on Tasks sub-tab adds task
-                                state.tasks.push(EditorTaskRow {
-                                    name: String::new(),
-                                    command: String::new(),
-                                    status: EditorRowStatus::Added,
-                                    original_name: None,
-                                });
-                                state.selected = state.tasks.len() - 1;
-                                state.editing = true;
-                                state.edit_column = 0;
-                                state.edit_buffer.clear();
-                                state.dirty = true;
-                            }
-                        }
-                    }
+                Action::EditorCancelEdit => {
+                    self.inline_editing = None;
                     return;
                 }
-                Action::EditorAddEnvVar => {
-                    if !state.editing {
-                        // Explicit 'A' always adds env var regardless of current sub-tab
-                        state.env_vars.push(EditorEnvRow {
-                            key: String::new(),
-                            value: String::new(),
-                            status: EditorRowStatus::Added,
-                            original_key: None,
-                        });
-                        state.selected = state.env_vars.len() - 1;
-                        state.tab = EditorTab::Env;
-                        state.editing = true;
-                        state.edit_column = 0;
-                        state.edit_buffer.clear();
-                        state.dirty = true;
-                    }
-                    return;
-                }
-                Action::EditorAddTask => {
-                    if !state.editing {
-                        // Explicit 'T' always adds task regardless of current sub-tab
-                        state.tasks.push(EditorTaskRow {
-                            name: String::new(),
-                            command: String::new(),
-                            status: EditorRowStatus::Added,
-                            original_name: None,
-                        });
-                        state.selected = state.tasks.len() - 1;
-                        state.tab = EditorTab::Tasks;
-                        state.editing = true;
-                        state.edit_column = 0;
-                        state.edit_buffer.clear();
-                        state.dirty = true;
-                    }
-                    return;
-                }
-                Action::EditorWrite => {
-                    if !state.editing {
-                        let editor_state = state.as_ref().clone();
-                        let tx = self.action_tx.clone();
-                        self.popup = Some(Popup::Progress {
-                            message: format!("Writing {}...", editor_state.file_path),
-                        });
-                        tokio::spawn(async move {
-                            match crate::mise::write_editor_changes(&editor_state).await {
-                                Ok(msg) => { let _ = tx.send(Action::EditorWriteComplete(msg)); }
-                                Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
-                            }
-                        });
-                    }
-                    return;
-                }
-                Action::EditorClose => {
-                    if !state.editing {
-                        if state.dirty {
-                            // Clone file_path to avoid borrow conflict
-                            let _ = state.file_path.clone();
-                            self.popup = Some(Popup::Confirm {
-                                message: "Unsaved changes. Discard? (Enter=yes, Esc=cancel)".to_string(),
-                                action_on_confirm: ConfirmAction::DiscardEditor,
-                            });
-                        } else {
-                            self.popup = None;
-                        }
-                    }
-                    return;
-                }
-                _ => {} // fall through for unhandled actions (e.g. Quit)
+                _ => return, // block everything else while editing
             }
         }
 
@@ -1368,62 +1062,27 @@ impl App {
             | Action::WizardNextStep
             | Action::WizardPrevStep => {}
 
-            Action::OpenEditor { path } => {
-                if self.popup.is_some() { return; }
-                self.popup = Some(Popup::Progress {
-                    message: format!("Loading {}...", path),
-                });
-                let tx = self.action_tx.clone();
-                tokio::spawn(async move {
-                    match mise::parse_config_for_editor(&path).await {
-                        Ok(state) => { let _ = tx.send(Action::EditorLoaded(Box::new(state))); }
-                        Err(e) => { let _ = tx.send(Action::OperationFailed(e)); }
-                    }
-                });
+            Action::EditorStatesLoaded(states) => {
+                self.editor_states = states;
+                self.editor_states_loaded = true;
             }
-            Action::EditorLoaded(state) => {
-                self.popup = Some(Popup::Editor(state));
+            // Inline editor actions handled by intercept block above or methods below
+            Action::EditorConfirmEdit | Action::EditorCancelEdit
+            | Action::EditorInput(_) | Action::EditorBackspace => {}
+            Action::EditorAddRow => {
+                self.handle_editor_add_row();
             }
-            // Editor actions are handled by the intercept block above.
-            // These arms exist to satisfy the exhaustive match — they are unreachable when
-            // the editor popup is open because the intercept block returns early.
-            Action::EditorSwitchTab
-            | Action::EditorConfirmEdit
-            | Action::EditorCancelEdit
-            | Action::EditorDeleteRow
-            | Action::EditorAddTool
-            | Action::EditorAddEnvVar
-            | Action::EditorAddTask
-            | Action::EditorWrite
-            | Action::EditorInput(_)
-            | Action::EditorBackspace
-            | Action::EditorClose => {}
-            Action::EditorStartEdit => {
-                // When no popup: open editor for selected config file
-                if self.popup.is_none() {
-                    let path = match self.tab {
-                        Tab::Config => {
-                            let configs = self.visible_configs_vec();
-                            configs.get(self.config_selected).map(|c| c.path.clone())
-                        }
-                        Tab::Projects => {
-                            if let Some(&idx) = self.filtered_projects.get(self.projects_selected) {
-                                let proj = &self.projects[idx];
-                                let p = std::path::Path::new(&proj.path).join(".mise.toml");
-                                if p.exists() { Some(p.to_string_lossy().to_string()) } else { None }
-                            } else { None }
-                        }
-                        _ => None,
-                    };
-                    if let Some(path) = path {
-                        self.handle_action(Action::OpenEditor { path });
-                    }
-                }
+            Action::EditorDeleteRow => {
+                self.handle_editor_delete_row();
+            }
+            Action::EditorWrite => {
+                self.handle_editor_write();
             }
             Action::EditorWriteComplete(msg) => {
                 self.popup = None;
                 self.status_message = Some((msg, 20));
-                self.start_fetch(); // EDIT-09: refresh config + tools
+                self.editor_states_loaded = false;
+                self.start_fetch();
             }
 
             Action::SaveScanConfig => {
@@ -1667,9 +1326,6 @@ impl App {
                                     }
                                 });
                             }
-                            ConfirmAction::DiscardEditor => {
-                                // User confirmed discarding changes — popup already taken, just close
-                            }
                         },
                         Popup::Help => {}
                         Popup::ToolDetail { .. } => {}
@@ -1680,9 +1336,6 @@ impl App {
                         }
                         Popup::ScanConfig { .. } => {
                             // ScanConfig confirm is handled by the intercept block above
-                        }
-                        Popup::Editor(_) => {
-                            // Editor confirm is handled by the intercept block (Plan 02)
                         }
                     }
                 } else if self.tab == Tab::Bootstrap && self.wizard.step == WizardStep::Idle {
@@ -1697,8 +1350,9 @@ impl App {
                 } else {
                     // No popup open — dispatch Enter contextually by tab
                     match self.tab {
-                        Tab::Tools => self.handle_action(Action::ShowToolDetail),
-                        Tab::Tasks => self.handle_action(Action::RunTask),
+                        Tab::Tools | Tab::Environment | Tab::Tasks => {
+                            self.start_inline_edit();
+                        }
                         Tab::Projects => {
                             if self.projects_drill_active {
                                 self.projects_drill_active = false;
@@ -1776,6 +1430,427 @@ impl App {
 
             Action::Render | Action::None => {}
         }
+    }
+
+    fn start_inline_edit(&mut self) {
+        if !self.editor_states_loaded || self.inline_editing.is_some() {
+            return;
+        }
+        match self.tab {
+            Tab::Tools => {
+                let tools = self.visible_tools();
+                if let Some(tool) = tools.get(self.tools_selected) {
+                    let source = tool.source.clone();
+                    let name = tool.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_tool(&source, &name) {
+                        let buffer = self.editor_states[ci].tools[ri].version.clone();
+                        self.inline_editing = Some(InlineEdit {
+                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        });
+                    }
+                }
+            }
+            Tab::Environment => {
+                let env = self.visible_env();
+                if let Some(var) = env.get(self.env_selected) {
+                    let source = var.source.clone();
+                    let key = var.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_env(&source, &key) {
+                        let buffer = self.editor_states[ci].env_vars[ri].value.clone();
+                        self.inline_editing = Some(InlineEdit {
+                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        });
+                    }
+                }
+            }
+            Tab::Tasks => {
+                let tasks = self.visible_tasks();
+                if let Some(task) = tasks.get(self.tasks_selected) {
+                    let source = task.source.clone();
+                    let name = task.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_task(&source, &name) {
+                        let buffer = self.editor_states[ci].tasks[ri].command.clone();
+                        self.inline_editing = Some(InlineEdit {
+                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn find_editor_tool(&self, source: &str, name: &str) -> Option<(usize, usize)> {
+        for (ci, state) in self.editor_states.iter().enumerate() {
+            if state.file_path == source {
+                for (ri, row) in state.tools.iter().enumerate() {
+                    if row.name == name && row.status != EditorRowStatus::Deleted {
+                        return Some((ci, ri));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_editor_env(&self, source: &str, key: &str) -> Option<(usize, usize)> {
+        for (ci, state) in self.editor_states.iter().enumerate() {
+            if state.file_path == source {
+                for (ri, row) in state.env_vars.iter().enumerate() {
+                    if row.key == key && row.status != EditorRowStatus::Deleted {
+                        return Some((ci, ri));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_editor_task(&self, source: &str, name: &str) -> Option<(usize, usize)> {
+        for (ci, state) in self.editor_states.iter().enumerate() {
+            if state.file_path == source {
+                for (ri, row) in state.tasks.iter().enumerate() {
+                    if row.name == name && row.status != EditorRowStatus::Deleted {
+                        return Some((ci, ri));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn handle_editor_confirm_edit(&mut self) {
+        let edit = match self.inline_editing.take() {
+            Some(e) => e,
+            None => return,
+        };
+        let state = &mut self.editor_states[edit.config_idx];
+        match self.tab {
+            Tab::Tools => {
+                if let Some(row) = state.tools.get_mut(edit.row_idx) {
+                    if edit.column == 0 {
+                        if row.name != edit.buffer {
+                            row.name = edit.buffer.clone();
+                            if row.status == EditorRowStatus::Unchanged {
+                                row.status = EditorRowStatus::Modified;
+                            }
+                            state.dirty = true;
+                        }
+                        if row.status == EditorRowStatus::Added {
+                            self.inline_editing = Some(InlineEdit {
+                                config_idx: edit.config_idx, row_idx: edit.row_idx,
+                                column: 1, buffer: row.version.clone(),
+                            });
+                            return;
+                        }
+                    } else if row.version != edit.buffer {
+                        row.version = edit.buffer;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
+                        }
+                        state.dirty = true;
+                    }
+                }
+            }
+            Tab::Environment => {
+                if let Some(row) = state.env_vars.get_mut(edit.row_idx) {
+                    if edit.column == 0 {
+                        if row.key != edit.buffer {
+                            row.key = edit.buffer.clone();
+                            if row.status == EditorRowStatus::Unchanged {
+                                row.status = EditorRowStatus::Modified;
+                            }
+                            state.dirty = true;
+                        }
+                        if row.status == EditorRowStatus::Added {
+                            self.inline_editing = Some(InlineEdit {
+                                config_idx: edit.config_idx, row_idx: edit.row_idx,
+                                column: 1, buffer: row.value.clone(),
+                            });
+                            return;
+                        }
+                    } else if row.value != edit.buffer {
+                        row.value = edit.buffer;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
+                        }
+                        state.dirty = true;
+                    }
+                }
+            }
+            Tab::Tasks => {
+                if let Some(row) = state.tasks.get_mut(edit.row_idx) {
+                    if edit.column == 0 {
+                        if row.name != edit.buffer {
+                            row.name = edit.buffer.clone();
+                            if row.status == EditorRowStatus::Unchanged {
+                                row.status = EditorRowStatus::Modified;
+                            }
+                            state.dirty = true;
+                        }
+                        if row.status == EditorRowStatus::Added {
+                            self.inline_editing = Some(InlineEdit {
+                                config_idx: edit.config_idx, row_idx: edit.row_idx,
+                                column: 1, buffer: row.command.clone(),
+                            });
+                            return;
+                        }
+                    } else if row.command != edit.buffer {
+                        row.command = edit.buffer;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
+                        }
+                        state.dirty = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_editor_add_row(&mut self) {
+        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+            return;
+        }
+        let source_path = match self.tab {
+            Tab::Tools => self.visible_tools().get(self.tools_selected).map(|t| t.source.clone()),
+            Tab::Environment => self.visible_env().get(self.env_selected).map(|e| e.source.clone()),
+            Tab::Tasks => self.visible_tasks().get(self.tasks_selected).map(|t| t.source.clone()),
+            _ => None,
+        };
+        let source_path = source_path
+            .filter(|p| !p.is_empty())
+            .or_else(|| self.editor_states.first().map(|s| s.file_path.clone()));
+        let source_path = match source_path {
+            Some(p) => p,
+            None => return,
+        };
+        let config_idx = match self.editor_states.iter().position(|s| s.file_path == source_path) {
+            Some(i) => i,
+            None => return,
+        };
+        match self.tab {
+            Tab::Tools => {
+                self.editor_states[config_idx].tools.push(EditorToolRow {
+                    name: String::new(), version: "latest".to_string(),
+                    status: EditorRowStatus::Added, original_name: None,
+                });
+                let row_idx = self.editor_states[config_idx].tools.len() - 1;
+                self.editor_states[config_idx].dirty = true;
+                self.inline_editing = Some(InlineEdit {
+                    config_idx, row_idx, column: 0, buffer: String::new(),
+                });
+            }
+            Tab::Environment => {
+                self.editor_states[config_idx].env_vars.push(EditorEnvRow {
+                    key: String::new(), value: String::new(),
+                    status: EditorRowStatus::Added, original_key: None,
+                });
+                let row_idx = self.editor_states[config_idx].env_vars.len() - 1;
+                self.editor_states[config_idx].dirty = true;
+                self.inline_editing = Some(InlineEdit {
+                    config_idx, row_idx, column: 0, buffer: String::new(),
+                });
+            }
+            Tab::Tasks => {
+                self.editor_states[config_idx].tasks.push(EditorTaskRow {
+                    name: String::new(), command: String::new(),
+                    status: EditorRowStatus::Added, original_name: None,
+                });
+                let row_idx = self.editor_states[config_idx].tasks.len() - 1;
+                self.editor_states[config_idx].dirty = true;
+                self.inline_editing = Some(InlineEdit {
+                    config_idx, row_idx, column: 0, buffer: String::new(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_editor_delete_row(&mut self) {
+        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+            return;
+        }
+        match self.tab {
+            Tab::Tools => {
+                let tools = self.visible_tools();
+                if let Some(tool) = tools.get(self.tools_selected) {
+                    let source = tool.source.clone();
+                    let name = tool.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_tool(&source, &name) {
+                        let row = &mut self.editor_states[ci].tools[ri];
+                        if row.status == EditorRowStatus::Added {
+                            self.editor_states[ci].tools.remove(ri);
+                        } else {
+                            row.status = EditorRowStatus::Deleted;
+                        }
+                        self.editor_states[ci].dirty = true;
+                    }
+                }
+            }
+            Tab::Environment => {
+                let env = self.visible_env();
+                if let Some(var) = env.get(self.env_selected) {
+                    let source = var.source.clone();
+                    let key = var.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_env(&source, &key) {
+                        let row = &mut self.editor_states[ci].env_vars[ri];
+                        if row.status == EditorRowStatus::Added {
+                            self.editor_states[ci].env_vars.remove(ri);
+                        } else {
+                            row.status = EditorRowStatus::Deleted;
+                        }
+                        self.editor_states[ci].dirty = true;
+                    }
+                }
+            }
+            Tab::Tasks => {
+                let tasks = self.visible_tasks();
+                if let Some(task) = tasks.get(self.tasks_selected) {
+                    let source = task.source.clone();
+                    let name = task.name.clone();
+                    if let Some((ci, ri)) = self.find_editor_task(&source, &name) {
+                        let row = &mut self.editor_states[ci].tasks[ri];
+                        if row.status == EditorRowStatus::Added {
+                            self.editor_states[ci].tasks.remove(ri);
+                        } else {
+                            row.status = EditorRowStatus::Deleted;
+                        }
+                        self.editor_states[ci].dirty = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_editor_write(&mut self) {
+        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+            return;
+        }
+        let dirty_states: Vec<EditorState> = self.editor_states.iter()
+            .filter(|s| s.dirty)
+            .cloned()
+            .collect();
+        if dirty_states.is_empty() {
+            self.status_message = Some(("No unsaved changes".to_string(), 15));
+            return;
+        }
+        let count = dirty_states.len();
+        self.popup = Some(Popup::Progress {
+            message: format!("Writing {} config file(s)...", count),
+        });
+        let tx = self.action_tx.clone();
+        tokio::spawn(async move {
+            let mut messages = Vec::new();
+            for state in &dirty_states {
+                match crate::mise::write_editor_changes(state).await {
+                    Ok(msg) => messages.push(msg),
+                    Err(e) => { let _ = tx.send(Action::OperationFailed(e)); return; }
+                }
+            }
+            let msg = messages.join(", ");
+            let _ = tx.send(Action::EditorWriteComplete(msg));
+        });
+    }
+
+    pub fn editor_tool_overlay(&self, source: &str, name: &str) -> Option<(EditorRowStatus, Option<String>)> {
+        for state in &self.editor_states {
+            if state.file_path == source {
+                for row in &state.tools {
+                    if row.name == name && row.status != EditorRowStatus::Unchanged {
+                        let ver = if row.status == EditorRowStatus::Modified { Some(row.version.clone()) } else { None };
+                        return Some((row.status, ver));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn editor_env_overlay(&self, source: &str, key: &str) -> Option<(EditorRowStatus, Option<String>)> {
+        for state in &self.editor_states {
+            if state.file_path == source {
+                for row in &state.env_vars {
+                    if row.key == key && row.status != EditorRowStatus::Unchanged {
+                        let val = if row.status == EditorRowStatus::Modified { Some(row.value.clone()) } else { None };
+                        return Some((row.status, val));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn editor_task_overlay(&self, source: &str, name: &str) -> Option<(EditorRowStatus, Option<String>)> {
+        for state in &self.editor_states {
+            if state.file_path == source {
+                for row in &state.tasks {
+                    if row.name == name && row.status != EditorRowStatus::Unchanged {
+                        let cmd = if row.status == EditorRowStatus::Modified { Some(row.command.clone()) } else { None };
+                        return Some((row.status, cmd));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn editor_added_tools(&self, file_path: &str) -> Vec<&EditorToolRow> {
+        self.editor_states.iter()
+            .filter(|s| s.file_path == file_path)
+            .flat_map(|s| s.tools.iter().filter(|r| r.status == EditorRowStatus::Added))
+            .collect()
+    }
+
+    pub fn editor_added_env(&self, file_path: &str) -> Vec<&EditorEnvRow> {
+        self.editor_states.iter()
+            .filter(|s| s.file_path == file_path)
+            .flat_map(|s| s.env_vars.iter().filter(|r| r.status == EditorRowStatus::Added))
+            .collect()
+    }
+
+    pub fn editor_added_tasks(&self, file_path: &str) -> Vec<&EditorTaskRow> {
+        self.editor_states.iter()
+            .filter(|s| s.file_path == file_path)
+            .flat_map(|s| s.tasks.iter().filter(|r| r.status == EditorRowStatus::Added))
+            .collect()
+    }
+
+    pub fn is_editing_tool(&self, source: &str, name: &str) -> Option<&InlineEdit> {
+        let edit = self.inline_editing.as_ref()?;
+        let state = self.editor_states.get(edit.config_idx)?;
+        if state.file_path != source { return None; }
+        let row = state.tools.get(edit.row_idx)?;
+        if row.name == name { Some(edit) } else { None }
+    }
+
+    pub fn is_editing_env(&self, source: &str, key: &str) -> Option<&InlineEdit> {
+        let edit = self.inline_editing.as_ref()?;
+        let state = self.editor_states.get(edit.config_idx)?;
+        if state.file_path != source { return None; }
+        let row = state.env_vars.get(edit.row_idx)?;
+        if row.key == key { Some(edit) } else { None }
+    }
+
+    pub fn is_editing_task(&self, source: &str, name: &str) -> Option<&InlineEdit> {
+        let edit = self.inline_editing.as_ref()?;
+        let state = self.editor_states.get(edit.config_idx)?;
+        if state.file_path != source { return None; }
+        let row = state.tasks.get(edit.row_idx)?;
+        if row.name == name { Some(edit) } else { None }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_editing_added_tool(&self, config_path: &str, row_idx: usize) -> Option<&InlineEdit> {
+        let edit = self.inline_editing.as_ref()?;
+        let state = self.editor_states.get(edit.config_idx)?;
+        if state.file_path != config_path { return None; }
+        if edit.row_idx == row_idx { Some(edit) } else { None }
+    }
+
+    pub fn has_unsaved_editor_changes(&self) -> bool {
+        self.editor_states.iter().any(|s| s.dirty)
     }
 
     fn move_selection(&mut self, delta: i32) {

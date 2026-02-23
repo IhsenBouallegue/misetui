@@ -659,6 +659,20 @@ pub async fn write_mise_toml(dir: &str, tools: &[(String, String)]) -> Result<()
     Ok(())
 }
 
+/// Load EditorStates for all TOML config files known to mise.
+pub async fn fetch_editor_states() -> Vec<EditorState> {
+    let configs = fetch_config().await.unwrap_or_default();
+    let mut states = Vec::new();
+    for config in &configs {
+        if config.path.ends_with(".toml") {
+            if let Ok(state) = parse_config_for_editor(&config.path).await {
+                states.push(state);
+            }
+        }
+    }
+    states
+}
+
 /// Parse a .mise.toml file into EditorState using toml_edit for round-trip preservation.
 /// Returns an EditorState with tools from [tools], env vars from [env], tasks from [tasks].
 pub async fn parse_config_for_editor(path: &str) -> Result<EditorState, String> {

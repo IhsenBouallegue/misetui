@@ -111,16 +111,12 @@ async fn main() -> Result<()> {
         // Wait for next event or action
         tokio::select! {
             Some(event_action) = events.next() => {
-                let action = if is_version_picker_active(&app) {
+                let action = if is_inline_editing(&app) {
+                    remap_inline_edit_action(event_action)
+                } else if is_version_picker_active(&app) {
                     remap_version_picker_action(event_action)
                 } else if is_scan_config_active(&app) {
                     remap_scan_config_action(event_action)
-                } else if is_editor_active(&app) {
-                    if is_editor_editing(&app) {
-                        remap_editor_edit_action(event_action)
-                    } else {
-                        remap_editor_action(event_action)
-                    }
                 } else if is_wizard_active(&app) {
                     remap_wizard_action(event_action)
                 } else if app.search_active && app.popup.is_none() {
@@ -156,16 +152,8 @@ fn is_wizard_active(app: &App) -> bool {
     app.tab == Tab::Bootstrap && app.wizard.step != WizardStep::Idle
 }
 
-fn is_editor_active(app: &App) -> bool {
-    matches!(app.popup, Some(Popup::Editor(_)))
-}
-
-fn is_editor_editing(app: &App) -> bool {
-    if let Some(Popup::Editor(ref state)) = app.popup {
-        state.editing
-    } else {
-        false
-    }
+fn is_inline_editing(app: &App) -> bool {
+    app.inline_editing.is_some()
 }
 
 /// In wizard popup mode, route chars to wizard navigation actions
@@ -217,7 +205,10 @@ fn remap_normal_action(action: Action) -> Action {
             '/' => Action::EnterSearch,
             'i' => Action::InstallTool,
             'u' => Action::UpdateTool,
-            'd' => Action::UninstallTool,
+            'd' => Action::EditorDeleteRow,
+            'a' => Action::EditorAddRow,
+            'v' => Action::ShowToolDetail,
+            'w' => Action::EditorWrite,
             '?' => Action::ShowHelp,
             'r' => Action::Refresh,
             'U' => Action::UseTool,
@@ -226,7 +217,6 @@ fn remap_normal_action(action: Action) -> Action {
             's' => Action::CycleSortOrder,
             'P' => Action::JumpToDriftProject,
             'c' => Action::OpenScanConfig,
-            'e' => Action::EditorStartEdit,
             _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
@@ -251,34 +241,8 @@ fn remap_search_action(action: Action) -> Action {
     }
 }
 
-/// Editor popup — normal navigation mode (not typing in a cell)
-fn remap_editor_action(action: Action) -> Action {
-    match action {
-        Action::SearchInput(c) => match c {
-            'j' => Action::MoveDown,
-            'k' => Action::MoveUp,
-            'h' => Action::EditorSwitchTab,  // backward (cycles via handle_action)
-            'l' => Action::EditorSwitchTab,  // forward (cycles via handle_action)
-            'e' => Action::EditorStartEdit,
-            'a' => Action::EditorAddTool,    // context-dependent in handle_action
-            'A' => Action::EditorAddEnvVar,
-            'T' => Action::EditorAddTask,
-            'd' => Action::EditorDeleteRow,
-            'w' => Action::EditorWrite,
-            'q' => Action::EditorClose,
-            _ => Action::None,
-        },
-        Action::NextTab => Action::EditorSwitchTab,
-        Action::PrevTab => Action::EditorSwitchTab,
-        Action::Confirm => Action::EditorStartEdit, // Enter starts editing selected row
-        Action::CancelPopup => Action::EditorClose,
-        Action::MoveUp | Action::MoveDown | Action::PageUp | Action::PageDown => action,
-        _ => Action::None,
-    }
-}
-
-/// Editor popup — inline edit mode (typing into a cell)
-fn remap_editor_edit_action(action: Action) -> Action {
+/// Inline edit mode — typing into a table cell
+fn remap_inline_edit_action(action: Action) -> Action {
     match action {
         Action::SearchInput(c) => Action::EditorInput(c),
         Action::SearchBackspace => Action::EditorBackspace,

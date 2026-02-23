@@ -7,43 +7,6 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    // When editor popup is active, show editor-specific hints and return early.
-    if let Some(crate::app::Popup::Editor(ref state)) = app.popup {
-        let hints: Vec<(&str, &str)> = if state.editing {
-            vec![("Enter", "confirm"), ("Esc", "cancel")]
-        } else {
-            let mut h: Vec<(&str, &str)> = vec![
-                ("h/l", "switch tab"),
-                ("j/k", "navigate"),
-                ("e", "edit"),
-            ];
-            match state.tab {
-                crate::model::EditorTab::Tools => h.push(("a", "add tool")),
-                crate::model::EditorTab::Env => h.push(("a", "add env")),
-                crate::model::EditorTab::Tasks => h.push(("a", "add task")),
-            }
-            h.push(("d", "delete"));
-            h.push(("w", "write"));
-            h.push(("Esc", "close"));
-            h
-        };
-
-        let spans: Vec<Span> = hints
-            .iter()
-            .flat_map(|(key, desc)| {
-                vec![
-                    Span::styled(format!(" {key} "), theme::key_hint()),
-                    Span::styled(format!("{desc} "), theme::key_desc()),
-                ]
-            })
-            .collect();
-
-        let footer = Paragraph::new(vec![Line::from(spans), Line::default()])
-            .style(ratatui::style::Style::default().bg(theme::BG));
-        f.render_widget(footer, area);
-        return;
-    }
-
     let mut hints: Vec<(&str, &str)> = vec![
         ("q", "quit"),
         ("Tab", "switch"),
@@ -76,9 +39,14 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             }
         },
         Tab::Tools => {
+            if app.editor_states_loaded {
+                hints.push(("Enter", "edit"));
+                hints.push(("a", "add"));
+                hints.push(("d", "delete"));
+                hints.push(("w", "write"));
+            }
+            hints.push(("v", "detail"));
             hints.push(("u", "update"));
-            hints.push(("d", "uninstall"));
-            hints.push(("Enter", "detail"));
         }
         Tab::Registry => {
             hints.push(("i", "install"));
@@ -89,24 +57,37 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             hints.push(("U", "upgrade all"));
         }
         Tab::Tasks => {
-            hints.push(("Enter", "run task"));
+            if app.editor_states_loaded {
+                hints.push(("Enter", "edit"));
+                hints.push(("a", "add"));
+                hints.push(("d", "delete"));
+                hints.push(("w", "write"));
+            }
         }
         Tab::Config => {
             hints.push(("t", "trust"));
-            hints.push(("e", "edit"));
         }
-        Tab::Environment | Tab::Settings | Tab::Doctor => {}
+        Tab::Environment => {
+            if app.editor_states_loaded {
+                hints.push(("Enter", "edit"));
+                hints.push(("a", "add"));
+                hints.push(("d", "delete"));
+                hints.push(("w", "write"));
+            }
+        }
+        Tab::Settings | Tab::Doctor => {}
         Tab::Projects => {
             hints.push(("i", "install tools"));
             hints.push(("u", "upgrade pins"));
-            hints.push(("e", "edit config"));
             hints.push(("Enter", "drill-down"));
         }
     }
 
     hints.push(("p", "prune"));
 
-    if app.search_active {
+    if app.inline_editing.is_some() {
+        hints = vec![("Enter", "confirm"), ("Esc", "cancel")];
+    } else if app.search_active {
         hints = vec![("Esc", "cancel search"), ("Type", "to filter")];
     }
 

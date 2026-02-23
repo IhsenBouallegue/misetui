@@ -45,13 +45,7 @@ impl InstalledTool {
                 let source = v
                     .source
                     .as_ref()
-                    .map(|s| {
-                        s.path
-                            .rsplit('/')
-                            .next()
-                            .unwrap_or(&s.path)
-                            .to_string()
-                    })
+                    .map(|s| s.path.clone())
                     .unwrap_or_default();
                 tools.push(InstalledTool {
                     name: name.clone(),
@@ -379,7 +373,20 @@ pub struct EditorTaskRow {
     pub original_name: Option<String>,
 }
 
-/// Full state for the inline editor popup.
+/// Active inline edit state — set when user is typing into a table cell.
+#[derive(Debug, Clone)]
+pub struct InlineEdit {
+    /// Index into App::editor_states
+    pub config_idx: usize,
+    /// Row index within that EditorState section (tools/env_vars/tasks)
+    pub row_idx: usize,
+    /// Column being edited: 0 = name/key, 1 = version/value/command
+    pub column: usize,
+    /// Current text buffer
+    pub buffer: String,
+}
+
+/// Full state for a config file's editable content.
 #[derive(Debug, Clone)]
 pub struct EditorState {
     /// Absolute path to the .mise.toml being edited.

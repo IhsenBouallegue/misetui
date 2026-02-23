@@ -49,20 +49,14 @@ pub enum Action {
     WizardPrevStep,
     WizardCompleted(String),
 
-    // Inline Editor
-    OpenEditor { path: String },
-    EditorLoaded(Box<EditorState>),
-    EditorSwitchTab,
-    EditorStartEdit,
+    // Inline Editor (editing directly in tab tables)
+    EditorStatesLoaded(Vec<EditorState>),
     EditorConfirmEdit,
     EditorCancelEdit,
     EditorDeleteRow,
-    EditorAddTool,
-    EditorAddEnvVar,
-    EditorAddTask,
+    EditorAddRow,
     EditorWrite,
     EditorWriteComplete(String),
-    EditorClose,
     EditorInput(char),
     EditorBackspace,
 
