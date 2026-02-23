@@ -358,53 +358,53 @@ fn parse_project(
 }
 
 /// Check the health of the current working directory's mise tool requirements.
-/// Shells out to `mise status` and maps the output to a `DriftState`.
 ///
-/// - `DriftState::NoConfig`  — no config file applies to CWD (empty output or "no config" message)
+/// Uses `mise ls --current` (tool-status API) rather than `mise status` (task API).
+///
+/// - `DriftState::NoConfig`  — no config applies to CWD (`mise ls --current` returns no rows)
 /// - `DriftState::Missing`   — at least one required tool is not installed
-/// - `DriftState::Drifted`   — tools installed but version mismatch (non-zero exit)
+/// - `DriftState::Drifted`   — tools installed but version differs from what config requests
 /// - `DriftState::Healthy`   — all tools present and at the requested version
 pub async fn check_cwd_drift() -> Result<DriftState, String> {
-    // `mise status` exits 0 if all tools are installed and matching the config.
-    // It exits non-zero if any are missing or drifted.
-    // When no config applies to the CWD, stdout is empty and stderr may contain
-    // a "no config" / "not found" message, or both are simply empty.
-    let output = Command::new("mise")
-        .args(["status"])
+    // Step 1: `mise ls --current` lists tools required by configs that apply to the CWD.
+    // Empty output means no config applies → NoConfig.
+    let current = Command::new("mise")
+        .args(["ls", "--current"])
         .output()
         .await
-        .map_err(|e| format!("Failed to run mise status: {e}"))?;
+        .map_err(|e| format!("Failed to run mise ls --current: {e}"))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    // No config: mise prints nothing or a "no config" / "not found" message.
-    if stdout.trim().is_empty() && stderr.trim().is_empty() {
+    let current_stdout = String::from_utf8_lossy(&current.stdout);
+    if current_stdout.trim().is_empty() {
         return Ok(DriftState::NoConfig);
     }
 
-    let stderr_lc = stderr.to_lowercase();
-    let stdout_lc = stdout.to_lowercase();
+    // Step 2: `mise ls --current --missing` lists tools required but not installed.
+    // Any output means at least one tool is missing.
+    let missing = Command::new("mise")
+        .args(["ls", "--current", "--missing"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise ls --current --missing: {e}"))?;
 
-    if stderr_lc.contains("no config")
-        || stderr_lc.contains("not found")
-        || stderr_lc.contains("no tasks defined")
-        || stderr_lc.contains("are you in a project directory")
-    {
-        return Ok(DriftState::NoConfig);
-    }
-
-    if !output.status.success() {
-        // Non-zero exit means a tool is missing or drifted — check for "missing" keyword.
-        if stderr_lc.contains("missing") || stdout_lc.contains("missing") {
-            return Ok(DriftState::Missing);
-        }
-        return Ok(DriftState::Drifted);
-    }
-
-    // Exit 0 — tools are present. Double-check stdout for any "missing" keyword as a safeguard.
-    if stdout_lc.contains("missing") {
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    if !missing_stdout.trim().is_empty() {
         return Ok(DriftState::Missing);
+    }
+
+    // Step 3: Check for version mismatches in `mise ls --current` output.
+    // Each row: <tool>  <installed>  <config-file>  <requested>
+    // If installed != requested (and requested isn't "latest"), the env is drifted.
+    for line in current_stdout.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        // A row with 4+ columns has an explicit requested version in the last column.
+        if cols.len() >= 4 {
+            let installed = cols[1];
+            let requested = cols[cols.len() - 1];
+            if requested != "latest" && installed != requested {
+                return Ok(DriftState::Drifted);
+            }
+        }
     }
 
     Ok(DriftState::Healthy)
