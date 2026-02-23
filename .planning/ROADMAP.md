@@ -29,7 +29,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can press `i` on a selected project to install all missing tools, and `u` to update all outdated tool pins
   4. User can fuzzy-search project names/paths with `/` and rescan with `r`
   5. User can configure scan directories and max depth via `~/.config/misetui/config.toml`; defaults apply when no config exists
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Config loader, health model types (MiseProject/ProjectToolHealth/ProjectHealthStatus), scan_projects() in mise.rs
+- [ ] 01-02-PLAN.md — Tab::Projects in App state, action wiring (ProjectsLoaded/InstallProjectTools/UpdateProjectPins), start_fetch() integration, i/u/r/search keybindings
+- [ ] 01-03-PLAN.md — src/ui/projects.rs renderer: project list with health badges + per-tool drill-down sub-view
+- [ ] 01-04-PLAN.md — Human verification of all PROJ-01 through PROJ-07 requirements
 
 ### Phase 2: Drift Indicator
 **Goal**: Users always know whether their current working directory's tool requirements are satisfied, without manually checking
@@ -76,7 +82,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Projects Tab | 0/TBD | Not started | - |
+| 1. Projects Tab | 0/4 | Not started | - |
 | 2. Drift Indicator | 0/3 | Not started | - |
 | 3. Bootstrap Wizard | 0/TBD | Not started | - |
 | 4. Inline Editor | 0/TBD | Not started | - |
