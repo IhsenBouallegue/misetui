@@ -1,6 +1,7 @@
 mod config;
 pub(super) mod highlight;
 mod doctor;
+pub(crate) mod editor;
 mod environment;
 mod footer;
 mod header;
@@ -27,6 +28,7 @@ pub fn render(f: &mut Frame, app: &App) {
     footer::render(f, layout.footer, app);
 
     match app.tab {
+        Tab::Bootstrap => wizard::render(f, layout.content, app),
         Tab::Tools => tools::render(f, layout.content, app),
         Tab::Outdated => outdated::render(f, layout.content, app),
         Tab::Registry => registry::render(f, layout.content, app),
