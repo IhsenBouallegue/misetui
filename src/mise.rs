@@ -1,6 +1,8 @@
+use crate::config::MisetuiConfig;
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseSetting,
-    MiseTask, OutdatedEntry, OutdatedTool, PruneCandidate, RegistryEntry,
+    ConfigFile, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseProject,
+    MiseSetting, MiseTask, OutdatedEntry, OutdatedTool, ProjectHealthStatus, ProjectToolHealth,
+    PruneCandidate, RegistryEntry,
 };
 use std::collections::BTreeMap;
 use tokio::process::Command;
@@ -182,6 +184,177 @@ pub async fn untrust_config(path: &str) -> Result<String, String> {
 pub async fn fetch_tool_info(tool: &str) -> Result<String, String> {
     // Returns raw JSON string for display in popup
     run_mise(&["tool", tool, "-J"]).await
+}
+
+/// Scan configured directories for .mise.toml files and compute project health.
+/// Cross-references against `installed_tools` (already loaded in-memory) to avoid
+/// extra mise subprocess calls.
+pub fn scan_projects(
+    config: &MisetuiConfig,
+    installed_tools: &[crate::model::InstalledTool],
+) -> Vec<MiseProject> {
+    // Build a fast lookup: tool name → active installed version
+    let mut installed_map: std::collections::HashMap<&str, &str> =
+        std::collections::HashMap::new();
+    for tool in installed_tools {
+        if tool.active {
+            installed_map.insert(tool.name.as_str(), tool.version.as_str());
+        }
+    }
+
+    let mut projects = Vec::new();
+
+    for scan_root in &config.scan_dirs {
+        collect_projects(scan_root, 0, config.max_depth, &installed_map, &mut projects);
+    }
+
+    // Deduplicate by path (a dir might appear in multiple scan roots)
+    projects.sort_by(|a, b| a.path.cmp(&b.path));
+    projects.dedup_by(|a, b| a.path == b.path);
+    projects.sort_by(|a, b| a.name.cmp(&b.name));
+    projects
+}
+
+fn collect_projects(
+    dir: &std::path::Path,
+    depth: usize,
+    max_depth: usize,
+    installed_map: &std::collections::HashMap<&str, &str>,
+    projects: &mut Vec<MiseProject>,
+) {
+    let config_path = dir.join(".mise.toml");
+    if config_path.exists() {
+        let project = parse_project(dir, &config_path, installed_map);
+        projects.push(project);
+        // Don't recurse into projects that already have a .mise.toml
+        return;
+    }
+
+    if depth >= max_depth {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip hidden directories and common non-project dirs
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
+                continue;
+            }
+            collect_projects(&path, depth + 1, max_depth, installed_map, projects);
+        }
+    }
+}
+
+fn parse_project(
+    dir: &std::path::Path,
+    config_path: &std::path::Path,
+    installed_map: &std::collections::HashMap<&str, &str>,
+) -> MiseProject {
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| dir.to_string_lossy().to_string());
+    let path = dir.to_string_lossy().to_string();
+
+    let Ok(contents) = std::fs::read_to_string(config_path) else {
+        return MiseProject {
+            name,
+            path,
+            tool_count: 0,
+            health: ProjectHealthStatus::NoConfig,
+            tools: Vec::new(),
+        };
+    };
+
+    // Parse [tools] table from .mise.toml using basic TOML parsing
+    let toml_val: toml::Value = match toml::from_str(&contents) {
+        Ok(v) => v,
+        Err(_) => {
+            return MiseProject {
+                name,
+                path,
+                tool_count: 0,
+                health: ProjectHealthStatus::NoConfig,
+                tools: Vec::new(),
+            };
+        }
+    };
+
+    let tool_entries: Vec<(String, String)> = toml_val
+        .get("tools")
+        .and_then(|t| t.as_table())
+        .map(|table| {
+            table
+                .iter()
+                .map(|(k, v)| {
+                    let version = match v {
+                        toml::Value::String(s) => s.clone(),
+                        toml::Value::Array(arr) => arr
+                            .first()
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("?")
+                            .to_string(),
+                        other => other.to_string(),
+                    };
+                    (k.clone(), version)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut tool_healths: Vec<ProjectToolHealth> = Vec::new();
+    let mut worst = ProjectHealthStatus::Healthy;
+
+    for (tool_name, required) in &tool_entries {
+        let status = match installed_map.get(tool_name.as_str()) {
+            None => ProjectHealthStatus::Missing,
+            Some(installed_ver) => {
+                // Simple version match: if required is "latest" or matches installed, healthy.
+                // Otherwise mark outdated.
+                if required == "latest" || *installed_ver == required.as_str() {
+                    ProjectHealthStatus::Healthy
+                } else {
+                    ProjectHealthStatus::Outdated
+                }
+            }
+        };
+
+        // Update worst-case aggregate
+        match (&worst, &status) {
+            (_, ProjectHealthStatus::Missing) => worst = ProjectHealthStatus::Missing,
+            (ProjectHealthStatus::Healthy, ProjectHealthStatus::Outdated) => {
+                worst = ProjectHealthStatus::Outdated
+            }
+            _ => {}
+        }
+
+        let installed = installed_map
+            .get(tool_name.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
+        tool_healths.push(ProjectToolHealth {
+            tool: tool_name.clone(),
+            required: required.clone(),
+            installed,
+            status,
+        });
+    }
+
+    MiseProject {
+        name,
+        path,
+        tool_count: tool_entries.len(),
+        health: worst,
+        tools: tool_healths,
+    }
 }
 
 /// Check the health of the current working directory's mise tool requirements.
