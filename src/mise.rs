@@ -632,3 +632,89 @@ pub fn migrate_legacy_pins(dir: &str) -> Vec<DetectedTool> {
         })
         .collect()
 }
+
+/// Write a .mise.toml file to `dir` with the given tool name/version pairs.
+/// Overwrites any existing .mise.toml. Uses atomic write (temp file + rename).
+pub async fn write_mise_toml(dir: &str, tools: &[(String, String)]) -> Result<(), String> {
+    use std::path::Path;
+    let path = Path::new(dir).join(".mise.toml");
+    let tmp_path = Path::new(dir).join(".mise.toml.tmp");
+
+    let mut content = String::from("[tools]\n");
+    for (name, version) in tools {
+        if version.is_empty() || version == "latest" {
+            content.push_str(&format!("{name} = \"latest\"\n"));
+        } else {
+            content.push_str(&format!("{name} = \"{version}\"\n"));
+        }
+    }
+
+    tokio::fs::write(&tmp_path, &content)
+        .await
+        .map_err(|e| format!("Failed to write temp file: {e}"))?;
+    tokio::fs::rename(&tmp_path, &path)
+        .await
+        .map_err(|e| format!("Failed to rename temp file: {e}"))?;
+    Ok(())
+}
+
+/// Write AGENTS.md and CLAUDE.md to `dir` with mise-specific agent instructions.
+/// Silently ignores write errors (non-critical optional feature — BOOT-07).
+pub async fn write_agent_files_for(dir: &str) -> Result<(), String> {
+    use std::path::Path;
+    let base = Path::new(dir);
+
+    let agents_content = "\
+# Agent Instructions
+
+## mise — Dev Tool Version Manager
+
+This project uses [mise](https://mise.jdx.dev/) to manage tool versions.
+
+### Installing tools
+```
+mise install
+```
+
+### Running tasks
+```
+mise run <task-name>
+mise tasks ls
+```
+
+### Checking environment
+```
+mise status
+mise ls
+```
+
+### Pinned versions
+Tool versions are pinned in `.mise.toml`. Always use the pinned version when running tools.
+Do not upgrade tool versions without updating `.mise.toml`.
+";
+
+    let claude_content = "\
+# Claude Code Instructions
+
+## Tool version management
+
+This project uses mise. Run `mise install` before starting work in a new terminal.
+Check `.mise.toml` for pinned tool versions — use these exact versions.
+
+## Running tasks
+
+```
+mise run <task>   # run a mise task
+mise tasks ls     # list all tasks
+```
+
+Do not use global tool versions that differ from `.mise.toml` pins.
+";
+
+    let agents_path = base.join("AGENTS.md");
+    let claude_path = base.join("CLAUDE.md");
+
+    let _ = tokio::fs::write(&agents_path, agents_content).await;
+    let _ = tokio::fs::write(&claude_path, claude_content).await;
+    Ok(())
+}

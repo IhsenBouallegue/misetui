@@ -1,6 +1,6 @@
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
-    PruneCandidate, RegistryEntry,
+    ConfigFile, DetectedTool, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting,
+    MiseTask, OutdatedTool, PruneCandidate, RegistryEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -40,6 +40,15 @@ pub enum Action {
     CheckDrift,
     DriftChecked(DriftState),
     JumpToDriftProject,
+
+    // Bootstrap Wizard
+    OpenWizard,
+    WizardDetected(Vec<DetectedTool>),
+    WizardToggleTool,
+    WizardToggleAgentFiles,
+    WizardNextStep,
+    WizardPrevStep,
+    WizardCompleted(String),
 
     // Operations
     InstallTool,

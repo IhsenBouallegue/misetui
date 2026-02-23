@@ -2,7 +2,7 @@ use crate::action::Action;
 use crate::mise;
 use crate::model::{
     ConfigFile, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
-    RegistryEntry,
+    RegistryEntry, WizardStep,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -105,6 +105,7 @@ pub enum Popup {
         /// Working copy of max_depth being edited.
         max_depth: usize,
     },
+    Wizard(crate::model::WizardState),
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +418,102 @@ impl App {
                     return;
                 }
                 _ => {} // fall through to normal handling
+            }
+        }
+
+        // Wizard popup intercepts navigation when wizard is active
+        if let Some(Popup::Wizard(ref mut wizard)) = self.popup {
+            match &action {
+                Action::MoveUp => {
+                    if wizard.step == WizardStep::Review && wizard.selected > 0 {
+                        wizard.selected -= 1;
+                    } else if wizard.step == WizardStep::Preview && wizard.preview_scroll > 0 {
+                        wizard.preview_scroll -= 1;
+                    }
+                    return;
+                }
+                Action::MoveDown => {
+                    if wizard.step == WizardStep::Review {
+                        if wizard.selected + 1 < wizard.tools.len() {
+                            wizard.selected += 1;
+                        }
+                    } else if wizard.step == WizardStep::Preview {
+                        wizard.preview_scroll += 1;
+                    }
+                    return;
+                }
+                Action::WizardToggleTool => {
+                    if wizard.step == WizardStep::Review {
+                        if let Some(tool) = wizard.tools.get_mut(wizard.selected) {
+                            tool.enabled = !tool.enabled;
+                        }
+                    }
+                    return;
+                }
+                Action::WizardToggleAgentFiles => {
+                    if wizard.step == WizardStep::Review {
+                        wizard.write_agent_files = !wizard.write_agent_files;
+                    }
+                    return;
+                }
+                Action::WizardNextStep | Action::Confirm => {
+                    match wizard.step {
+                        WizardStep::Detecting => {
+                            // do nothing — waiting for WizardDetected
+                        }
+                        WizardStep::Review => {
+                            // Generate preview, advance to Preview step
+                            let preview = generate_mise_toml_preview(&wizard.tools);
+                            wizard.preview_content = preview;
+                            wizard.step = WizardStep::Preview;
+                            wizard.preview_scroll = 0;
+                        }
+                        WizardStep::Preview => {
+                            // Trigger write + install
+                            let target = wizard.target_dir.clone();
+                            let tools: Vec<_> = wizard.tools.iter()
+                                .filter(|t| t.enabled)
+                                .map(|t| (t.name.clone(), t.version.clone()))
+                                .collect();
+                            let agent_files = wizard.write_agent_files;
+                            wizard.step = WizardStep::Writing;
+                            let tx = self.action_tx.clone();
+                            tokio::spawn(async move {
+                                match mise::write_mise_toml(&target, &tools).await {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        let _ = tx.send(Action::OperationFailed(e));
+                                        return;
+                                    }
+                                }
+                                if agent_files {
+                                    let _ = mise::write_agent_files_for(&target).await;
+                                }
+                                // Reuse existing install_project_tools (runs `mise install` in dir)
+                                match mise::install_project_tools(&target).await {
+                                    Ok(msg) => { let _ = tx.send(Action::WizardCompleted(msg)); }
+                                    Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
+                                }
+                            });
+                        }
+                        WizardStep::Writing => {}
+                    }
+                    return;
+                }
+                Action::WizardPrevStep => {
+                    match wizard.step {
+                        WizardStep::Preview => {
+                            wizard.step = WizardStep::Review;
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                Action::CancelPopup => {
+                    self.popup = None;
+                    return;
+                }
+                _ => {}
             }
         }
 
@@ -880,6 +977,48 @@ impl App {
                 });
             }
 
+            Action::OpenWizard => {
+                if self.popup.is_some() {
+                    return;
+                }
+                let target = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .to_string_lossy()
+                    .to_string();
+                self.popup = Some(Popup::Wizard(crate::model::WizardState {
+                    target_dir: target.clone(),
+                    step: crate::model::WizardStep::Detecting,
+                    tools: Vec::new(),
+                    selected: 0,
+                    preview_content: String::new(),
+                    write_agent_files: false,
+                    preview_scroll: 0,
+                }));
+                // Spawn detection — async because detect_project_tools calls mise ls -J
+                let tx = self.action_tx.clone();
+                tokio::spawn(async move {
+                    let tools = mise::detect_project_tools(&target).await;
+                    let _ = tx.send(Action::WizardDetected(tools));
+                });
+            }
+            Action::WizardDetected(tools) => {
+                if let Some(Popup::Wizard(ref mut wizard)) = self.popup {
+                    wizard.tools = tools;
+                    wizard.step = crate::model::WizardStep::Review;
+                    wizard.selected = 0;
+                }
+            }
+            Action::WizardCompleted(msg) => {
+                self.popup = None;
+                self.status_message = Some((msg, 30));
+                self.start_fetch();
+            }
+            // These are handled by the intercept block; arms here prevent non-exhaustive match errors
+            Action::WizardToggleTool
+            | Action::WizardToggleAgentFiles
+            | Action::WizardNextStep
+            | Action::WizardPrevStep => {}
+
             Action::SaveScanConfig => {
                 if let Some(Popup::ScanConfig { dirs, max_depth, .. }) = &self.popup {
                     let dirs_clone: Vec<_> = dirs.iter()
@@ -1131,6 +1270,9 @@ impl App {
                         }
                         Popup::ScanConfig { .. } => {
                             // ScanConfig confirm is handled by the intercept block above
+                        }
+                        Popup::Wizard { .. } => {
+                            // Wizard confirm is handled by the intercept block above
                         }
                     }
                 } else {
@@ -1790,4 +1932,18 @@ impl App {
             ""
         }
     }
+}
+
+/// Build the .mise.toml content string from a list of enabled tools.
+/// Called by the wizard intercept block to populate preview_content.
+fn generate_mise_toml_preview(tools: &[crate::model::DetectedTool]) -> String {
+    let mut lines = vec!["[tools]".to_string()];
+    for tool in tools.iter().filter(|t| t.enabled) {
+        if tool.version.is_empty() || tool.version == "latest" {
+            lines.push(format!("{} = \"latest\"", tool.name));
+        } else {
+            lines.push(format!("{} = \"{}\"", tool.name, tool.version));
+        }
+    }
+    lines.join("\n") + "\n"
 }

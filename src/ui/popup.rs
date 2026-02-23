@@ -1,4 +1,5 @@
 use crate::app::{App, Popup};
+use crate::model::{WizardStep};
 use crate::theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
@@ -43,6 +44,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth } => {
             render_scan_config(f, dirs, *selected, *adding, new_dir, *max_depth)
         }
+        Popup::Wizard(wizard) => render_wizard(f, wizard),
     }
 }
 
@@ -275,6 +277,147 @@ fn render_help(f: &mut Frame) {
 
     let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+}
+
+fn render_wizard(f: &mut Frame, wizard: &crate::model::WizardState) {
+    let area = centered_rect(62, 26, f.area());
+    f.render_widget(Clear, area);
+
+    let step_label = match wizard.step {
+        WizardStep::Detecting => " Bootstrap Wizard — Detecting... ",
+        WizardStep::Review    => " Bootstrap Wizard — Review ",
+        WizardStep::Preview   => " Bootstrap Wizard — Preview ",
+        WizardStep::Writing   => " Bootstrap Wizard — Writing... ",
+    };
+
+    let block = Block::default()
+        .title(Span::styled(step_label, theme::title()))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::popup_border())
+        .style(theme::popup_bg());
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    match wizard.step {
+        WizardStep::Detecting => {
+            let lines = vec![
+                Line::default(),
+                Line::from(Span::styled(
+                    "  Detecting tools from filesystem...",
+                    theme::progress(),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), inner);
+        }
+        WizardStep::Review => {
+            // Layout: hint | tool list | blank | agent files toggle | blank | hints
+            let chunks = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // header hint
+                    Constraint::Min(1),    // tool list
+                    Constraint::Length(1), // blank
+                    Constraint::Length(1), // agent files toggle
+                    Constraint::Length(1), // blank
+                    Constraint::Length(1), // keybinding hints
+                ])
+                .split(inner);
+
+            let header = Line::from(vec![
+                Span::styled("  Tools detected in ", theme::muted()),
+                Span::styled(&wizard.target_dir, theme::title()),
+            ]);
+            f.render_widget(Paragraph::new(header), chunks[0]);
+
+            if wizard.tools.is_empty() {
+                let empty = Paragraph::new(Span::styled(
+                    "  No tools detected.",
+                    theme::muted(),
+                ));
+                f.render_widget(empty, chunks[1]);
+            } else {
+                let items: Vec<ListItem> = wizard.tools.iter().map(|t| {
+                    let toggle = if t.enabled { "☑" } else { "☐" };
+                    let installed_label = if t.installed { " (installed)" } else { "" };
+                    let style = if t.enabled { theme::table_row() } else { theme::muted() };
+                    ListItem::new(Span::styled(
+                        format!("  {toggle} {} @ {}{}", t.name, t.version, installed_label),
+                        style,
+                    ))
+                }).collect();
+
+                let list = List::new(items).highlight_style(theme::table_selected());
+                let mut state = ListState::default();
+                state.select(Some(wizard.selected));
+                f.render_stateful_widget(list, chunks[1], &mut state);
+            }
+
+            let agent_toggle = if wizard.write_agent_files { "☑" } else { "☐" };
+            let agent_line = Line::from(vec![
+                Span::styled(format!("  {agent_toggle} Write AGENTS.md + CLAUDE.md"), theme::table_row()),
+                Span::styled("  (press a to toggle)", theme::muted()),
+            ]);
+            f.render_widget(Paragraph::new(agent_line), chunks[3]);
+
+            let hint = Line::from(vec![
+                Span::styled("  j/k", theme::key_hint()),
+                Span::styled(" nav  ", theme::key_desc()),
+                Span::styled("Space", theme::key_hint()),
+                Span::styled(" toggle  ", theme::key_desc()),
+                Span::styled("Enter", theme::key_hint()),
+                Span::styled(" preview  ", theme::key_desc()),
+                Span::styled("Esc", theme::key_hint()),
+                Span::styled(" cancel", theme::key_desc()),
+            ]);
+            f.render_widget(Paragraph::new(hint), chunks[5]);
+        }
+        WizardStep::Preview => {
+            let chunks = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // header
+                    Constraint::Min(1),    // preview content
+                    Constraint::Length(1), // blank
+                    Constraint::Length(1), // hints
+                ])
+                .split(inner);
+
+            let header = Line::from(Span::styled(
+                "  .mise.toml preview:",
+                theme::muted(),
+            ));
+            f.render_widget(Paragraph::new(header), chunks[0]);
+
+            let preview = Paragraph::new(wizard.preview_content.as_str())
+                .style(theme::table_row())
+                .scroll((wizard.preview_scroll as u16, 0));
+            f.render_widget(preview, chunks[1]);
+
+            let hint = Line::from(vec![
+                Span::styled("  j/k", theme::key_hint()),
+                Span::styled(" scroll  ", theme::key_desc()),
+                Span::styled("Enter", theme::key_hint()),
+                Span::styled(" write+install  ", theme::key_desc()),
+                Span::styled("p", theme::key_hint()),
+                Span::styled(" back  ", theme::key_desc()),
+                Span::styled("Esc", theme::key_hint()),
+                Span::styled(" cancel", theme::key_desc()),
+            ]);
+            f.render_widget(Paragraph::new(hint), chunks[3]);
+        }
+        WizardStep::Writing => {
+            let lines = vec![
+                Line::default(),
+                Line::from(Span::styled(
+                    "  Writing .mise.toml and running mise install...",
+                    theme::progress(),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), inner);
+        }
+    }
 }
 
 fn render_scan_config(
