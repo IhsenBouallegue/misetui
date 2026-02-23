@@ -1,6 +1,6 @@
 use crate::model::{
-    ConfigFile, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseSetting, MiseTask,
-    OutdatedEntry, OutdatedTool, PruneCandidate, RegistryEntry,
+    ConfigFile, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion, MiseSetting,
+    MiseTask, OutdatedEntry, OutdatedTool, PruneCandidate, RegistryEntry,
 };
 use std::collections::BTreeMap;
 use tokio::process::Command;
@@ -182,4 +182,52 @@ pub async fn untrust_config(path: &str) -> Result<String, String> {
 pub async fn fetch_tool_info(tool: &str) -> Result<String, String> {
     // Returns raw JSON string for display in popup
     run_mise(&["tool", tool, "-J"]).await
+}
+
+/// Check the health of the current working directory's mise tool requirements.
+/// Shells out to `mise status` and maps the output to a `DriftState`.
+///
+/// - `DriftState::NoConfig`  — no config file applies to CWD (empty output or "no config" message)
+/// - `DriftState::Missing`   — at least one required tool is not installed
+/// - `DriftState::Drifted`   — tools installed but version mismatch (non-zero exit)
+/// - `DriftState::Healthy`   — all tools present and at the requested version
+pub async fn check_cwd_drift() -> Result<DriftState, String> {
+    // `mise status` exits 0 if all tools are installed and matching the config.
+    // It exits non-zero if any are missing or drifted.
+    // When no config applies to the CWD, stdout is empty and stderr may contain
+    // a "no config" / "not found" message, or both are simply empty.
+    let output = Command::new("mise")
+        .args(["status"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise status: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // No config: mise prints nothing or a "no config" / "not found" message.
+    if stdout.trim().is_empty() && stderr.trim().is_empty() {
+        return Ok(DriftState::NoConfig);
+    }
+
+    if stderr.to_lowercase().contains("no config")
+        || stderr.to_lowercase().contains("not found")
+    {
+        return Ok(DriftState::NoConfig);
+    }
+
+    if !output.status.success() {
+        // Non-zero exit means a tool is missing or drifted — check for "missing" keyword.
+        if stderr.to_lowercase().contains("missing") || stdout.to_lowercase().contains("missing") {
+            return Ok(DriftState::Missing);
+        }
+        return Ok(DriftState::Drifted);
+    }
+
+    // Exit 0 — tools are present. Double-check stdout for any "missing" keyword as a safeguard.
+    if stdout.to_lowercase().contains("missing") {
+        return Ok(DriftState::Missing);
+    }
+
+    Ok(DriftState::Healthy)
 }
