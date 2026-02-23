@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Projects Tab** - Multi-project health dashboard with drill-down and install/update actions (completed 2026-02-23)
 - [x] **Phase 2: Drift Indicator** - Persistent header-bar indicator with live filesystem watch (completed 2026-02-23)
-- [ ] **Phase 3: Bootstrap Wizard** - Guided .mise.toml generator with auto-detection and install
+- [x] **Phase 3: Bootstrap Wizard** - Guided .mise.toml generator with auto-detection and install (completed 2026-02-23)
 - [ ] **Phase 4: Inline Editor** - Structured TOML editor with atomic writes and toml_edit round-trip
 
 ## Phase Details
@@ -90,5 +90,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Projects Tab | 4/5 | Complete    | 2026-02-23 |
 | 2. Drift Indicator | 3/3 | Complete    | 2026-02-23 |
-| 3. Bootstrap Wizard | 2/3 | In Progress|  |
+| 3. Bootstrap Wizard | 3/3 | Complete   | 2026-02-23 |
 | 4. Inline Editor | 0/TBD | Not started | - |
