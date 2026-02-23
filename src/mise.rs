@@ -1,6 +1,7 @@
 use crate::config::MisetuiConfig;
 use crate::model::{
-    ConfigFile, DetectedTool, DriftState, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion,
+    ConfigFile, DetectedTool, DriftState, EditorEnvRow, EditorRowStatus, EditorState, EditorTab,
+    EditorTaskRow, EditorToolRow, EnvVar, EnvVarEntry, InstalledTool, InstalledToolVersion,
     MiseProject, MiseSetting, MiseTask, OutdatedEntry, OutdatedTool, ProjectHealthStatus,
     ProjectToolHealth, PruneCandidate, RegistryEntry,
 };
@@ -658,6 +659,197 @@ pub async fn write_mise_toml(dir: &str, tools: &[(String, String)]) -> Result<()
     Ok(())
 }
 
+/// Parse a .mise.toml file into EditorState using toml_edit for round-trip preservation.
+/// Returns an EditorState with tools from [tools], env vars from [env], tasks from [tasks].
+pub async fn parse_config_for_editor(path: &str) -> Result<EditorState, String> {
+    use toml_edit::DocumentMut;
+    let contents = tokio::fs::read_to_string(path).await
+        .map_err(|e| format!("Failed to read {path}: {e}"))?;
+    let doc: DocumentMut = contents.parse::<DocumentMut>()
+        .map_err(|e| format!("Failed to parse TOML: {e}"))?;
+
+    let mut tools = Vec::new();
+    if let Some(table) = doc.get("tools").and_then(|v| v.as_table()) {
+        for (key, value) in table.iter() {
+            let version = match value.as_str() {
+                Some(s) => s.to_string(),
+                None => match value.as_array() {
+                    Some(arr) => arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .next()
+                        .unwrap_or("?")
+                        .to_string(),
+                    None => value.to_string().trim_matches('"').to_string(),
+                },
+            };
+            tools.push(EditorToolRow {
+                name: key.to_string(),
+                version,
+                status: EditorRowStatus::Unchanged,
+                original_name: Some(key.to_string()),
+            });
+        }
+    }
+
+    let mut env_vars = Vec::new();
+    if let Some(table) = doc.get("env").and_then(|v| v.as_table()) {
+        for (key, value) in table.iter() {
+            let val_str = match value.as_str() {
+                Some(s) => s.to_string(),
+                None => value.to_string().trim_matches('"').to_string(),
+            };
+            env_vars.push(EditorEnvRow {
+                key: key.to_string(),
+                value: val_str,
+                status: EditorRowStatus::Unchanged,
+                original_key: Some(key.to_string()),
+            });
+        }
+    }
+
+    let mut tasks = Vec::new();
+    if let Some(table) = doc.get("tasks").and_then(|v| v.as_table()) {
+        for (key, value) in table.iter() {
+            let command = match value.as_str() {
+                Some(s) => s.to_string(),
+                None => match value.as_table() {
+                    Some(t) => t.get("run")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    None => value.to_string().trim_matches('"').to_string(),
+                },
+            };
+            tasks.push(EditorTaskRow {
+                name: key.to_string(),
+                command,
+                status: EditorRowStatus::Unchanged,
+                original_name: Some(key.to_string()),
+            });
+        }
+    }
+
+    Ok(EditorState {
+        file_path: path.to_string(),
+        tab: EditorTab::Tools,
+        tools,
+        env_vars,
+        tasks,
+        selected: 0,
+        editing: false,
+        edit_column: 0,
+        edit_buffer: String::new(),
+        raw_document: doc.to_string(),
+        dirty: false,
+    })
+}
+
+/// Write editor changes back to the .mise.toml file using toml_edit for round-trip preservation.
+/// Applies all modifications (edits, adds, deletes) to the stored Document, then writes atomically.
+pub async fn write_editor_changes(state: &EditorState) -> Result<String, String> {
+    use toml_edit::{value, DocumentMut, Item, Table};
+    let mut doc: DocumentMut = state.raw_document.parse::<DocumentMut>()
+        .map_err(|e| format!("Failed to re-parse document: {e}"))?;
+
+    // Apply tool changes
+    {
+        let tools_table = doc.entry("tools").or_insert(Item::Table(Table::new()));
+        let table = tools_table.as_table_mut()
+            .ok_or_else(|| "[tools] is not a table".to_string())?;
+
+        // Delete removed tools (by original_name)
+        for row in &state.tools {
+            if row.status == EditorRowStatus::Deleted {
+                if let Some(ref orig) = row.original_name {
+                    table.remove(orig);
+                }
+            }
+        }
+        // Update modified and add new tools
+        for row in &state.tools {
+            match row.status {
+                EditorRowStatus::Modified => {
+                    // Remove old key if renamed
+                    if let Some(ref orig) = row.original_name {
+                        if orig != &row.name { table.remove(orig); }
+                    }
+                    table.insert(&row.name, value(&row.version));
+                }
+                EditorRowStatus::Added => {
+                    table.insert(&row.name, value(&row.version));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Apply env changes
+    {
+        let env_table = doc.entry("env").or_insert(Item::Table(Table::new()));
+        let table = env_table.as_table_mut()
+            .ok_or_else(|| "[env] is not a table".to_string())?;
+
+        for row in &state.env_vars {
+            if row.status == EditorRowStatus::Deleted {
+                if let Some(ref orig) = row.original_key { table.remove(orig); }
+            }
+        }
+        for row in &state.env_vars {
+            match row.status {
+                EditorRowStatus::Modified => {
+                    if let Some(ref orig) = row.original_key {
+                        if orig != &row.key { table.remove(orig); }
+                    }
+                    table.insert(&row.key, value(&row.value));
+                }
+                EditorRowStatus::Added => {
+                    table.insert(&row.key, value(&row.value));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Apply task changes
+    {
+        let tasks_table = doc.entry("tasks").or_insert(Item::Table(Table::new()));
+        let table = tasks_table.as_table_mut()
+            .ok_or_else(|| "[tasks] is not a table".to_string())?;
+
+        for row in &state.tasks {
+            if row.status == EditorRowStatus::Deleted {
+                if let Some(ref orig) = row.original_name { table.remove(orig); }
+            }
+        }
+        for row in &state.tasks {
+            match row.status {
+                EditorRowStatus::Modified => {
+                    if let Some(ref orig) = row.original_name {
+                        if orig != &row.name { table.remove(orig); }
+                    }
+                    table.insert(&row.name, value(&row.command));
+                }
+                EditorRowStatus::Added => {
+                    table.insert(&row.name, value(&row.command));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Atomic write: temp file + rename
+    let path = std::path::Path::new(&state.file_path);
+    let tmp_path = path.with_extension("toml.tmp");
+    let content = doc.to_string();
+
+    tokio::fs::write(&tmp_path, &content).await
+        .map_err(|e| format!("Failed to write temp file: {e}"))?;
+    tokio::fs::rename(&tmp_path, path).await
+        .map_err(|e| format!("Failed to rename temp file: {e}"))?;
+
+    Ok(format!("Saved {}", state.file_path))
+}
+
 /// Write AGENTS.md and CLAUDE.md to `dir` with mise-specific agent instructions.
 /// Silently ignores write errors (non-critical optional feature — BOOT-07).
 pub async fn write_agent_files_for(dir: &str) -> Result<(), String> {
@@ -667,48 +859,20 @@ pub async fn write_agent_files_for(dir: &str) -> Result<(), String> {
     let agents_content = "\
 # Agent Instructions
 
-## mise — Dev Tool Version Manager
-
 This project uses [mise](https://mise.jdx.dev/) to manage tool versions.
+Tool versions are pinned in `.mise.toml` — always use these exact versions.
 
-### Installing tools
-```
-mise install
-```
-
-### Running tasks
-```
-mise run <task-name>
-mise tasks ls
-```
-
-### Checking environment
-```
-mise status
-mise ls
-```
-
-### Pinned versions
-Tool versions are pinned in `.mise.toml`. Always use the pinned version when running tools.
-Do not upgrade tool versions without updating `.mise.toml`.
+- `mise install` — install pinned tools
+- `mise run <task>` — run a task
+- `mise ls` — list installed tools
 ";
 
     let claude_content = "\
-# Claude Code Instructions
+# CLAUDE.md
 
-## Tool version management
-
-This project uses mise. Run `mise install` before starting work in a new terminal.
-Check `.mise.toml` for pinned tool versions — use these exact versions.
-
-## Running tasks
-
-```
-mise run <task>   # run a mise task
-mise tasks ls     # list all tasks
-```
-
-Do not use global tool versions that differ from `.mise.toml` pins.
+Uses mise for tool versions. Run `mise install` first.
+See `.mise.toml` for pinned versions — do not deviate from these.
+Run tasks with `mise run <task>`, list with `mise tasks ls`.
 ";
 
     let agents_path = base.join("AGENTS.md");

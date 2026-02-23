@@ -9,7 +9,8 @@ mod tui;
 mod ui;
 
 use action::Action;
-use app::{App, Popup};
+use app::{App, Popup, Tab};
+use model::WizardStep;
 use color_eyre::Result;
 use event::EventHandler;
 use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -114,6 +115,8 @@ async fn main() -> Result<()> {
                     remap_version_picker_action(event_action)
                 } else if is_scan_config_active(&app) {
                     remap_scan_config_action(event_action)
+                } else if is_editor_active(&app) {
+                    remap_editor_action(event_action)
                 } else if is_wizard_active(&app) {
                     remap_wizard_action(event_action)
                 } else if app.search_active && app.popup.is_none() {
@@ -146,7 +149,11 @@ fn is_scan_config_active(app: &App) -> bool {
 }
 
 fn is_wizard_active(app: &App) -> bool {
-    matches!(app.popup, Some(Popup::Wizard(_)))
+    app.tab == Tab::Bootstrap && app.wizard.step != WizardStep::Idle
+}
+
+fn is_editor_active(app: &App) -> bool {
+    matches!(app.popup, Some(Popup::Editor(_)))
 }
 
 /// In wizard popup mode, route chars to wizard navigation actions
@@ -207,7 +214,7 @@ fn remap_normal_action(action: Action) -> Action {
             's' => Action::CycleSortOrder,
             'P' => Action::JumpToDriftProject,
             'c' => Action::OpenScanConfig,
-            'B' => Action::OpenWizard,
+            'e' => Action::EditorStartEdit,
             _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
@@ -228,6 +235,14 @@ fn remap_search_action(action: Action) -> Action {
         | Action::MoveDown
         | Action::PageUp
         | Action::PageDown => action,
+        _ => Action::None,
+    }
+}
+
+/// In inline editor popup mode, pass through cancel; all other keys are no-ops (Plan 02 replaces)
+fn remap_editor_action(action: Action) -> Action {
+    match action {
+        Action::CancelPopup => Action::CancelPopup,
         _ => Action::None,
     }
 }

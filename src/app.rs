@@ -1,8 +1,8 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
-    ConfigFile, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
-    RegistryEntry, WizardStep,
+    ConfigFile, DriftState, EditorState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask,
+    OutdatedTool, RegistryEntry, WizardState, WizardStep,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Bootstrap,
     Tools,
     Outdated,
     Registry,
@@ -23,7 +24,8 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 10] = [
+        Tab::Bootstrap,
         Tab::Tools,
         Tab::Outdated,
         Tab::Registry,
@@ -37,6 +39,7 @@ impl Tab {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Tab::Bootstrap => "⚡ Bootstrap",
             Tab::Tools => " Tools",
             Tab::Outdated => " Outdated",
             Tab::Registry => " Registry",
@@ -51,15 +54,16 @@ impl Tab {
 
     pub fn index(&self) -> usize {
         match self {
-            Tab::Tools => 0,
-            Tab::Outdated => 1,
-            Tab::Registry => 2,
-            Tab::Tasks => 3,
-            Tab::Environment => 4,
-            Tab::Settings => 5,
-            Tab::Config => 6,
-            Tab::Projects => 7,
-            Tab::Doctor => 8,
+            Tab::Bootstrap => 0,
+            Tab::Tools => 1,
+            Tab::Outdated => 2,
+            Tab::Registry => 3,
+            Tab::Tasks => 4,
+            Tab::Environment => 5,
+            Tab::Settings => 6,
+            Tab::Config => 7,
+            Tab::Projects => 8,
+            Tab::Doctor => 9,
         }
     }
 }
@@ -105,7 +109,7 @@ pub enum Popup {
         /// Working copy of max_depth being edited.
         max_depth: usize,
     },
-    Wizard(crate::model::WizardState),
+    Editor(Box<EditorState>),
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +211,9 @@ pub struct App {
     // Drift indicator state
     pub drift_state: DriftState,
 
+    // Bootstrap wizard state (lives on App, rendered as tab content)
+    pub wizard: WizardState,
+
     // Action channel for async operations
     pub action_tx: mpsc::UnboundedSender<Action>,
 }
@@ -281,6 +288,18 @@ impl App {
             status_message: None,
             spinner_frame: 0,
             drift_state: DriftState::Checking,
+            wizard: WizardState {
+                target_dir: std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .to_string_lossy()
+                    .to_string(),
+                step: WizardStep::Idle,
+                tools: Vec::new(),
+                selected: 0,
+                preview_content: String::new(),
+                write_agent_files: false,
+                preview_scroll: 0,
+            },
             action_tx,
         }
     }
@@ -421,8 +440,9 @@ impl App {
             }
         }
 
-        // Wizard popup intercepts navigation when wizard is active
-        if let Some(Popup::Wizard(ref mut wizard)) = self.popup {
+        // Bootstrap tab intercepts navigation when wizard is active (not Idle)
+        if self.tab == Tab::Bootstrap && self.wizard.step != WizardStep::Idle {
+            let wizard = &mut self.wizard;
             match &action {
                 Action::MoveUp => {
                     if wizard.step == WizardStep::Review && wizard.selected > 0 {
@@ -458,18 +478,17 @@ impl App {
                 }
                 Action::WizardNextStep | Action::Confirm => {
                     match wizard.step {
+                        WizardStep::Idle => {} // handled below in main match
                         WizardStep::Detecting => {
                             // do nothing — waiting for WizardDetected
                         }
                         WizardStep::Review => {
-                            // Generate preview, advance to Preview step
                             let preview = generate_mise_toml_preview(&wizard.tools);
                             wizard.preview_content = preview;
                             wizard.step = WizardStep::Preview;
                             wizard.preview_scroll = 0;
                         }
                         WizardStep::Preview => {
-                            // Trigger write + install
                             let target = wizard.target_dir.clone();
                             let tools: Vec<_> = wizard.tools.iter()
                                 .filter(|t| t.enabled)
@@ -489,7 +508,6 @@ impl App {
                                 if agent_files {
                                     let _ = mise::write_agent_files_for(&target).await;
                                 }
-                                // Reuse existing install_project_tools (runs `mise install` in dir)
                                 match mise::install_project_tools(&target).await {
                                     Ok(msg) => { let _ = tx.send(Action::WizardCompleted(msg)); }
                                     Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
@@ -510,7 +528,11 @@ impl App {
                     return;
                 }
                 Action::CancelPopup => {
-                    self.popup = None;
+                    self.wizard.step = WizardStep::Idle;
+                    self.wizard.tools.clear();
+                    self.wizard.selected = 0;
+                    self.wizard.preview_content.clear();
+                    self.wizard.preview_scroll = 0;
                     return;
                 }
                 _ => {}
@@ -977,39 +999,19 @@ impl App {
                 });
             }
 
-            Action::OpenWizard => {
-                if self.popup.is_some() {
-                    return;
-                }
-                let target = std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .to_string_lossy()
-                    .to_string();
-                self.popup = Some(Popup::Wizard(crate::model::WizardState {
-                    target_dir: target.clone(),
-                    step: crate::model::WizardStep::Detecting,
-                    tools: Vec::new(),
-                    selected: 0,
-                    preview_content: String::new(),
-                    write_agent_files: false,
-                    preview_scroll: 0,
-                }));
-                // Spawn detection — async because detect_project_tools calls mise ls -J
-                let tx = self.action_tx.clone();
-                tokio::spawn(async move {
-                    let tools = mise::detect_project_tools(&target).await;
-                    let _ = tx.send(Action::WizardDetected(tools));
-                });
-            }
             Action::WizardDetected(tools) => {
-                if let Some(Popup::Wizard(ref mut wizard)) = self.popup {
-                    wizard.tools = tools;
-                    wizard.step = crate::model::WizardStep::Review;
-                    wizard.selected = 0;
+                if self.tab == Tab::Bootstrap {
+                    self.wizard.tools = tools;
+                    self.wizard.step = WizardStep::Review;
+                    self.wizard.selected = 0;
                 }
             }
             Action::WizardCompleted(msg) => {
-                self.popup = None;
+                self.wizard.step = WizardStep::Idle;
+                self.wizard.tools.clear();
+                self.wizard.selected = 0;
+                self.wizard.preview_content.clear();
+                self.wizard.preview_scroll = 0;
                 self.status_message = Some((msg, 30));
                 self.start_fetch();
             }
@@ -1018,6 +1020,62 @@ impl App {
             | Action::WizardToggleAgentFiles
             | Action::WizardNextStep
             | Action::WizardPrevStep => {}
+
+            Action::OpenEditor { path } => {
+                if self.popup.is_some() { return; }
+                self.popup = Some(Popup::Progress {
+                    message: format!("Loading {}...", path),
+                });
+                let tx = self.action_tx.clone();
+                tokio::spawn(async move {
+                    match mise::parse_config_for_editor(&path).await {
+                        Ok(state) => { let _ = tx.send(Action::EditorLoaded(Box::new(state))); }
+                        Err(e) => { let _ = tx.send(Action::OperationFailed(e)); }
+                    }
+                });
+            }
+            Action::EditorLoaded(state) => {
+                self.popup = Some(Popup::Editor(state));
+            }
+            // Editor actions handled by intercept block (Plan 02) — stubs to prevent non-exhaustive match
+            Action::EditorSwitchTab
+            | Action::EditorConfirmEdit
+            | Action::EditorCancelEdit
+            | Action::EditorDeleteRow
+            | Action::EditorAddTool
+            | Action::EditorAddEnvVar
+            | Action::EditorAddTask
+            | Action::EditorWrite
+            | Action::EditorInput(_)
+            | Action::EditorBackspace
+            | Action::EditorClose => {}
+            Action::EditorStartEdit => {
+                // When no popup: open editor for selected config file
+                if self.popup.is_none() {
+                    let path = match self.tab {
+                        Tab::Config => {
+                            let configs = self.visible_configs_vec();
+                            configs.get(self.config_selected).map(|c| c.path.clone())
+                        }
+                        Tab::Projects => {
+                            if let Some(&idx) = self.filtered_projects.get(self.projects_selected) {
+                                let proj = &self.projects[idx];
+                                let p = std::path::Path::new(&proj.path).join(".mise.toml");
+                                if p.exists() { Some(p.to_string_lossy().to_string()) } else { None }
+                            } else { None }
+                        }
+                        _ => None,
+                    };
+                    if let Some(path) = path {
+                        self.handle_action(Action::OpenEditor { path });
+                    }
+                }
+            }
+            Action::EditorWriteComplete(msg) => {
+                self.popup = None;
+                self.status_message = Some((msg, 20));
+                self.start_fetch(); // EDIT-09: refresh config + tools
+            }
 
             Action::SaveScanConfig => {
                 if let Some(Popup::ScanConfig { dirs, max_depth, .. }) = &self.popup {
@@ -1271,10 +1329,19 @@ impl App {
                         Popup::ScanConfig { .. } => {
                             // ScanConfig confirm is handled by the intercept block above
                         }
-                        Popup::Wizard { .. } => {
-                            // Wizard confirm is handled by the intercept block above
+                        Popup::Editor(_) => {
+                            // Editor confirm is handled by the intercept block (Plan 02)
                         }
                     }
+                } else if self.tab == Tab::Bootstrap && self.wizard.step == WizardStep::Idle {
+                    // Start wizard detection
+                    let target = self.wizard.target_dir.clone();
+                    self.wizard.step = WizardStep::Detecting;
+                    let tx = self.action_tx.clone();
+                    tokio::spawn(async move {
+                        let tools = mise::detect_project_tools(&target).await;
+                        let _ = tx.send(Action::WizardDetected(tools));
+                    });
                 } else {
                     // No popup open — dispatch Enter contextually by tab
                     match self.tab {
@@ -1313,6 +1380,14 @@ impl App {
 
             Action::OperationFailed(msg) => {
                 self.popup = None;
+                // Reset wizard if it was in Writing state
+                if self.wizard.step == WizardStep::Writing {
+                    self.wizard.step = WizardStep::Idle;
+                    self.wizard.tools.clear();
+                    self.wizard.selected = 0;
+                    self.wizard.preview_content.clear();
+                    self.wizard.preview_scroll = 0;
+                }
                 self.status_message = Some((format!("Error: {msg}"), 20));
             }
 
@@ -1381,6 +1456,9 @@ impl App {
         }
 
         match self.tab {
+            Tab::Bootstrap => {
+                // Wizard navigation is handled by the intercept block above
+            }
             Tab::Tools => {
                 let len = self.filtered_tools.len();
                 Self::adjust_selection(&mut self.tools_selected, delta, len);
@@ -1470,6 +1548,7 @@ impl App {
 
     fn reset_selection_for_tab(&mut self) {
         match self.tab {
+            Tab::Bootstrap => {}
             Tab::Tools => self.tools_selected = 0,
             Tab::Registry => self.registry_selected = 0,
             Tab::Config => self.config_selected = 0,

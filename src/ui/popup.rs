@@ -43,7 +43,19 @@ pub fn render(f: &mut Frame, app: &App) {
         Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth } => {
             render_scan_config(f, dirs, *selected, *adding, new_dir, *max_depth)
         }
-        Popup::Wizard(wizard) => super::wizard::render_wizard(f, wizard),
+        Popup::Editor(ref _state) => {
+            // Full renderer added in Plan 03 (editor.rs)
+            let area = centered_rect(70, 24, f.area());
+            f.render_widget(Clear, area);
+            let block = Block::default()
+                .title(Span::styled(" Editor ", theme::title()))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::popup_border())
+                .style(theme::popup_bg());
+            let msg = Paragraph::new("  Loading editor...").block(block);
+            f.render_widget(msg, area);
+        }
     }
 }
 
@@ -258,7 +270,6 @@ fn render_help(f: &mut Frame) {
         "    t            Trust config (Config)",
         "    s            Cycle sort column/order",
         "    c            Edit scan config (Projects)",
-        "    B            Bootstrap wizard (create .mise.toml)",
         "    Esc          Cancel / Close popup",
         "    q            Quit",
         "    ?            This help",

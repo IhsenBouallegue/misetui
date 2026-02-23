@@ -1,6 +1,6 @@
 use crate::model::{
-    ConfigFile, DetectedTool, DriftState, EnvVar, InstalledTool, MiseProject, MiseSetting,
-    MiseTask, OutdatedTool, PruneCandidate, RegistryEntry,
+    ConfigFile, DetectedTool, DriftState, EditorState, EnvVar, InstalledTool, MiseProject,
+    MiseSetting, MiseTask, OutdatedTool, PruneCandidate, RegistryEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -42,13 +42,29 @@ pub enum Action {
     JumpToDriftProject,
 
     // Bootstrap Wizard
-    OpenWizard,
     WizardDetected(Vec<DetectedTool>),
     WizardToggleTool,
     WizardToggleAgentFiles,
     WizardNextStep,
     WizardPrevStep,
     WizardCompleted(String),
+
+    // Inline Editor
+    OpenEditor { path: String },
+    EditorLoaded(Box<EditorState>),
+    EditorSwitchTab,
+    EditorStartEdit,
+    EditorConfirmEdit,
+    EditorCancelEdit,
+    EditorDeleteRow,
+    EditorAddTool,
+    EditorAddEnvVar,
+    EditorAddTask,
+    EditorWrite,
+    EditorWriteComplete(String),
+    EditorClose,
+    EditorInput(char),
+    EditorBackspace,
 
     // Operations
     InstallTool,
