@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-23)
 
 **Core value:** See all your project environments at a glance and act on them without leaving the terminal.
-**Current focus:** Phase 3 — Bootstrap Wizard
+**Current focus:** Phase 4 — Inline Editor
 
 ## Current Position
 
-Phase: 3 of 4 (Bootstrap Wizard) — IN PROGRESS; Phase 1 (Projects Tab) and Phase 2 (Drift Indicator) complete
-Plan: 3 of 3 complete in phase 03 (awaiting Task 2 human verify checkpoint)
-Status: Phase 03 Plan 03 Checkpoint — wizard UI renderer complete, awaiting human visual verification
-Last activity: 2026-02-23 — Completed 03-03-PLAN.md Task 1 (wizard.rs renderer, popup.rs delegation, footer B hint)
+Phase: 4 of 4 (Inline Editor) — IN PROGRESS; Phases 1-3 complete
+Plan: 1 of 3 complete in phase 04
+Status: Phase 04 Plan 01 Complete — editor data foundation (EditorState types, parse/write functions, Popup::Editor, 'e' keybinding)
+Last activity: 2026-02-23 — Completed 04-01-PLAN.md (toml_edit dependency, EditorState types, parse_config_for_editor, write_editor_changes, Action/Popup wiring)
 
 Progress: [████████░░] 75%
 
@@ -37,6 +37,7 @@ Progress: [████████░░] 75%
 
 *Updated after each plan completion*
 | Phase 03-bootstrap-wizard P03 | 3 | 1 tasks | 4 files |
+| Phase 04-inline-editor P01 | 2 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Recent decisions affecting current work:
 - [Phase 03-bootstrap-wizard]: Wizard intercept block intercepts Action::Confirm (Enter) and WizardNextStep to advance steps — matches ScanConfig intercept pattern
 - [Phase 03-bootstrap-wizard]: write_agent_files_for() silently ignores write errors — non-critical BOOT-07 feature
 - [Phase 03-bootstrap-wizard plan 03]: wizard.rs duplicates centered_rect helper (not pub from popup.rs); success_style() inlined with theme::GREEN per Phase 02 pattern; B hint added globally to footer
+- [Phase 04-inline-editor]: raw_document stored as String in EditorState — keeps model.rs toml_edit-free, re-parsed in write_editor_changes()
+- [Phase 04-inline-editor]: EditorLoaded wraps EditorState in Box to avoid Action enum size bloat (large struct with multiple Vecs)
+- [Phase 04-inline-editor]: EditorStartEdit 'e' key: context-sensitive path resolution in handle_action — Config tab uses config path, Projects tab joins .mise.toml onto project dir
 
 ### Pending Todos
 
@@ -75,5 +79,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: 03-03-PLAN.md checkpoint:human-verify (Task 1 complete; Task 2 awaiting human visual verification of wizard UI)
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

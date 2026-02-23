@@ -34,14 +34,14 @@
 
 ### Inline Editor
 
-- [ ] **EDIT-01**: User can press `e` on any config file (from Config tab or Projects tab) to open a structured inline TOML editor
+- [x] **EDIT-01**: User can press `e` on any config file (from Config tab or Projects tab) to open a structured inline TOML editor
 - [ ] **EDIT-02**: User can add a tool entry by pressing `a`, which opens the existing registry + version picker flow and appends to `[tools]`
 - [ ] **EDIT-03**: User can edit an existing tool's version with `e` on a tool row, which opens the version picker pre-filtered to that tool
 - [ ] **EDIT-04**: User can delete a tool entry with `d` on a tool row (with confirmation dialog)
 - [ ] **EDIT-05**: User can add and edit `[env]` entries (key/value) with `A` / `e`
 - [ ] **EDIT-06**: User can add and edit `[tasks]` entries (name/command) with `T` / `e`
-- [ ] **EDIT-07**: User can write changes to disk with `w`; file is written atomically (temp file + rename) and a success message is shown
-- [ ] **EDIT-08**: Changes are written using `toml_edit` to preserve original formatting and comments
+- [x] **EDIT-07**: User can write changes to disk with `w`; file is written atomically (temp file + rename) and a success message is shown
+- [x] **EDIT-08**: Changes are written using `toml_edit` to preserve original formatting and comments
 - [ ] **EDIT-09**: After a successful write, the app triggers a config + tools refresh
 
 ## v2 Requirements
@@ -96,14 +96,14 @@
 | BOOT-05 | Phase 3 | Complete |
 | BOOT-06 | Phase 3 | Complete |
 | BOOT-07 | Phase 3 | Complete |
-| EDIT-01 | Phase 4 | Pending |
+| EDIT-01 | Phase 4 | Complete |
 | EDIT-02 | Phase 4 | Pending |
 | EDIT-03 | Phase 4 | Pending |
 | EDIT-04 | Phase 4 | Pending |
 | EDIT-05 | Phase 4 | Pending |
 | EDIT-06 | Phase 4 | Pending |
-| EDIT-07 | Phase 4 | Pending |
-| EDIT-08 | Phase 4 | Pending |
+| EDIT-07 | Phase 4 | Complete |
+| EDIT-08 | Phase 4 | Complete |
 | EDIT-09 | Phase 4 | Pending |
 
 **Coverage:**
