@@ -40,20 +40,20 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
 fn drift_label(state: DriftState) -> &'static str {
     match state {
-        DriftState::Checking => " CWD: checking...",
-        DriftState::Healthy  => " CWD: healthy",
-        DriftState::Drifted  => "! CWD: drifted",
-        DriftState::Missing  => "! CWD: missing",
-        DriftState::NoConfig => " CWD: no config",
+        DriftState::Checking   => " CWD: checking...",
+        DriftState::Healthy    => " CWD: healthy",
+        DriftState::Missing    => "! CWD: missing",
+        DriftState::NoConfig   => " CWD: no config",
+        DriftState::Untrusted  => "! CWD: untrusted",
     }
 }
 
 fn drift_style(state: DriftState) -> Style {
     match state {
-        DriftState::Checking => theme::muted(),
-        DriftState::Healthy  => Style::default().fg(theme::GREEN),
-        DriftState::Drifted  => Style::default().fg(theme::YELLOW),
-        DriftState::Missing  => theme::error(),
-        DriftState::NoConfig => theme::muted(),
+        DriftState::Checking   => theme::muted(),
+        DriftState::Healthy    => Style::default().fg(theme::GREEN),
+        DriftState::Missing    => theme::error(),
+        DriftState::NoConfig   => theme::muted(),
+        DriftState::Untrusted  => Style::default().fg(theme::YELLOW),
     }
 }

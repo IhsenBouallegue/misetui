@@ -5,6 +5,7 @@ use crate::model::{
     PruneCandidate, RegistryEntry,
 };
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use tokio::process::Command;
 
 async fn run_mise(args: &[&str]) -> Result<String, String> {
@@ -359,50 +360,90 @@ fn parse_project(
 
 /// Check the health of the current working directory's mise tool requirements.
 ///
-/// Uses `mise ls --current` (tool-status API) rather than `mise status` (task API).
+/// Uses `mise config ls --json` + `mise ls --current --json` (proper tool-status APIs).
 ///
-/// - `DriftState::NoConfig`  — no config applies to CWD (`mise ls --current` returns no rows)
-/// - `DriftState::Missing`   — at least one required tool is not installed
-/// - `DriftState::Drifted`   — tools installed but version differs from what config requests
-/// - `DriftState::Healthy`   — all tools present and at the requested version
+/// - `DriftState::NoConfig`  — no local .mise.toml applies; only global config (or nothing)
+/// - `DriftState::Missing`   — one or more local-config tools are not installed
+/// - `DriftState::Untrusted` — a local .mise.toml exists but hasn't been trusted
+/// - `DriftState::Healthy`   — all local-config tools are installed
 pub async fn check_cwd_drift() -> Result<DriftState, String> {
-    // Step 1: `mise ls --current` lists tools required by configs that apply to the CWD.
-    // Empty output means no config applies → NoConfig.
-    let current = Command::new("mise")
-        .args(["ls", "--current"])
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Cannot determine CWD: {e}"))?;
+
+    // Step 1: Detect whether a local (non-global) config applies to this directory.
+    // `mise config ls --json` returns an array of config entries ordered by precedence.
+    let config_out = Command::new("mise")
+        .args(["config", "ls", "--json"])
+        .current_dir(&cwd)
         .output()
         .await
-        .map_err(|e| format!("Failed to run mise ls --current: {e}"))?;
+        .map_err(|e| format!("Failed to run mise config ls: {e}"))?;
 
-    let current_stdout = String::from_utf8_lossy(&current.stdout);
-    if current_stdout.trim().is_empty() {
+    // Untrusted config — exit 1, empty stdout, error in stderr.
+    if !config_out.status.success() {
+        let stderr = String::from_utf8_lossy(&config_out.stderr);
+        if stderr.contains("not trusted") {
+            return Ok(DriftState::Untrusted);
+        }
         return Ok(DriftState::NoConfig);
     }
 
-    // Step 2: `mise ls --current --missing` lists tools required but not installed.
-    // Any output means at least one tool is missing.
-    let missing = Command::new("mise")
-        .args(["ls", "--current", "--missing"])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run mise ls --current --missing: {e}"))?;
+    let configs: Vec<serde_json::Value> =
+        serde_json::from_slice(&config_out.stdout).unwrap_or_default();
 
-    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
-    if !missing_stdout.trim().is_empty() {
-        return Ok(DriftState::Missing);
+    // Global config lives at $XDG_CONFIG_HOME/mise/config.toml.
+    let global_config: Option<PathBuf> = dirs::config_dir().map(|d| d.join("mise/config.toml"));
+
+    let local_config_paths: Vec<PathBuf> = configs
+        .iter()
+        .filter_map(|e| e["path"].as_str().map(PathBuf::from))
+        .filter(|p| {
+            global_config
+                .as_ref()
+                .map(|g| p != g)
+                .unwrap_or(true)
+        })
+        .collect();
+
+    if local_config_paths.is_empty() {
+        return Ok(DriftState::NoConfig);
     }
 
-    // Step 3: Check for version mismatches in `mise ls --current` output.
-    // Each row: <tool>  <installed>  <config-file>  <requested>
-    // If installed != requested (and requested isn't "latest"), the env is drifted.
-    for line in current_stdout.lines() {
-        let cols: Vec<&str> = line.split_whitespace().collect();
-        // A row with 4+ columns has an explicit requested version in the last column.
-        if cols.len() >= 4 {
-            let installed = cols[1];
-            let requested = cols[cols.len() - 1];
-            if requested != "latest" && installed != requested {
-                return Ok(DriftState::Drifted);
+    // Step 2: Check tool installation state for local-config tools only.
+    // `mise ls --current --json` returns { "tool": [ { installed, source, ... } ] }
+    let ls_out = Command::new("mise")
+        .args(["ls", "--current", "--json"])
+        .current_dir(&cwd)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run mise ls: {e}"))?;
+
+    if !ls_out.status.success() {
+        let stderr = String::from_utf8_lossy(&ls_out.stderr);
+        if stderr.contains("not trusted") {
+            return Ok(DriftState::Untrusted);
+        }
+        return Err(String::from_utf8_lossy(&ls_out.stderr).into_owned());
+    }
+
+    let tools: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_slice(&ls_out.stdout).unwrap_or_default();
+
+    for (_tool, versions) in &tools {
+        if let Some(arr) = versions.as_array() {
+            for entry in arr {
+                // Only flag tools sourced from a local config file.
+                let source_path = entry["source"]["path"]
+                    .as_str()
+                    .map(PathBuf::from);
+                let is_local = source_path
+                    .as_ref()
+                    .map(|p| local_config_paths.contains(p))
+                    .unwrap_or(false);
+
+                if is_local && entry["installed"].as_bool() == Some(false) {
+                    return Ok(DriftState::Missing);
+                }
             }
         }
     }

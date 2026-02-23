@@ -217,15 +217,17 @@ pub struct PruneCandidate {
 
 /// Health state of the current working directory's tool requirements.
 /// Checking = async check in flight; Healthy = all tools present and correct version;
-/// Drifted = at least one tool version mismatch; Missing = at least one tool not installed;
-/// NoConfig = no .mise.toml or global config applies to CWD.
+/// Checking = async check in flight; Healthy = all local-config tools installed;
+/// Missing = one or more not installed (covers exact-version pins too);
+/// NoConfig = no local .mise.toml applies to CWD (global config only);
+/// Untrusted = .mise.toml exists but has not been trusted with `mise trust`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriftState {
     Checking,
     Healthy,
-    Drifted,
     Missing,
     NoConfig,
+    Untrusted,
 }
 
 /// Health status for a project or individual tool requirement.
