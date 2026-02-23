@@ -1,6 +1,8 @@
 use crate::app::App;
+use crate::model::DriftState;
 use crate::theme;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
@@ -22,6 +24,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 theme::header_stat()
             },
         ),
+        Span::raw("  "),
+        Span::styled(drift_label(app.drift_state), drift_style(app.drift_state)),
     ];
 
     let block = Block::default()
@@ -32,4 +36,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let header = Paragraph::new(Line::from(title_spans)).block(block);
     f.render_widget(header, area);
+}
+
+fn drift_label(state: DriftState) -> &'static str {
+    match state {
+        DriftState::Checking => " CWD: checking...",
+        DriftState::Healthy  => " CWD: healthy",
+        DriftState::Drifted  => "! CWD: drifted",
+        DriftState::Missing  => "! CWD: missing",
+        DriftState::NoConfig => " CWD: no config",
+    }
+}
+
+fn drift_style(state: DriftState) -> Style {
+    match state {
+        DriftState::Checking => theme::muted(),
+        DriftState::Healthy  => Style::default().fg(theme::GREEN),
+        DriftState::Drifted  => Style::default().fg(theme::YELLOW),
+        DriftState::Missing  => theme::error(),
+        DriftState::NoConfig => theme::muted(),
+    }
 }

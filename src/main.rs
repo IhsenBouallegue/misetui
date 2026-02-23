@@ -80,6 +80,7 @@ fn remap_normal_action(action: Action) -> Action {
             'p' => Action::PruneTool,
             't' => Action::TrustConfig,
             's' => Action::CycleSortOrder,
+            'P' => Action::JumpToDriftProject,
             _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
