@@ -93,6 +93,18 @@ pub enum Popup {
         scroll: usize,
     },
     Help,
+    ScanConfig {
+        /// Working copy of scan dirs being edited.
+        dirs: Vec<String>,
+        /// Currently highlighted dir in the list.
+        selected: usize,
+        /// When true, user is typing a new directory path.
+        adding: bool,
+        /// Text buffer for the new directory path being typed.
+        new_dir: String,
+        /// Working copy of max_depth being edited.
+        max_depth: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -346,6 +358,75 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        // ScanConfig popup intercepts navigation before the main action switch
+        if let Some(Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth }) = &mut self.popup {
+            match &action {
+                Action::MoveUp => {
+                    if !*adding && *selected > 0 { *selected -= 1; }
+                    return;
+                }
+                Action::MoveDown => {
+                    if !*adding && *selected + 1 < dirs.len() { *selected += 1; }
+                    return;
+                }
+                // 'd' mapped to UninstallTool in remap_scan_config_action
+                Action::UninstallTool => {
+                    if !*adding && !dirs.is_empty() {
+                        dirs.remove(*selected);
+                        if *selected >= dirs.len() && !dirs.is_empty() { *selected = dirs.len() - 1; }
+                    }
+                    return;
+                }
+                // 'a' mapped to InstallTool
+                Action::InstallTool => {
+                    if !*adding { *adding = true; new_dir.clear(); }
+                    return;
+                }
+                // '+' increases max_depth, '-' decreases (sent as SearchInput when adding=false)
+                Action::SearchInput('+') if !*adding => {
+                    *max_depth += 1;
+                    return;
+                }
+                Action::SearchInput('-') if !*adding && *max_depth > 1 => {
+                    *max_depth -= 1;
+                    return;
+                }
+                // Typing when adding=true
+                Action::SearchInput(c) if *adding => {
+                    new_dir.push(*c);
+                    return;
+                }
+                Action::SearchBackspace if *adding => {
+                    new_dir.pop();
+                    return;
+                }
+                // Enter: confirm new dir (when adding) OR save (when not adding)
+                Action::Confirm if *adding => {
+                    let dir = new_dir.trim().to_string();
+                    if !dir.is_empty() { dirs.push(dir); }
+                    *adding = false;
+                    new_dir.clear();
+                    return;
+                }
+                Action::Confirm => {
+                    // Save — clone values out then dispatch
+                    self.handle_action(Action::SaveScanConfig);
+                    return;
+                }
+                // Esc: cancel add mode OR close popup
+                Action::CancelPopup if *adding => {
+                    *adding = false;
+                    new_dir.clear();
+                    return;
+                }
+                Action::CancelPopup => {
+                    self.popup = None;
+                    return;
+                }
+                _ => {} // fall through to normal handling
+            }
+        }
+
         match action {
             Action::Quit => {
                 if self.popup.is_some() {
@@ -780,6 +861,55 @@ impl App {
                 });
             }
 
+            Action::OpenScanConfig => {
+                if self.tab != Tab::Projects || self.popup.is_some() {
+                    return;
+                }
+                let config = crate::config::MisetuiConfig::load();
+                let dirs = config.scan_dirs.iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                self.popup = Some(Popup::ScanConfig {
+                    dirs,
+                    selected: 0,
+                    adding: false,
+                    new_dir: String::new(),
+                    max_depth: config.max_depth,
+                });
+            }
+
+            Action::SaveScanConfig => {
+                if let Some(Popup::ScanConfig { dirs, max_depth, .. }) = &self.popup {
+                    let dirs_clone: Vec<_> = dirs.iter()
+                        .filter(|d| !d.trim().is_empty())
+                        .map(|d| std::path::PathBuf::from(d))
+                        .collect();
+                    let max_depth = *max_depth;
+                    let config = crate::config::MisetuiConfig {
+                        scan_dirs: dirs_clone,
+                        max_depth,
+                    };
+                    match config.save() {
+                        Ok(()) => {
+                            self.popup = None;
+                            // Rescan with updated config
+                            let tx = self.action_tx.clone();
+                            let tools_snapshot = self.tools.clone();
+                            tokio::spawn(async move {
+                                let cfg = crate::config::MisetuiConfig::load();
+                                let projects = crate::mise::scan_projects(&cfg, &tools_snapshot);
+                                let _ = tx.send(Action::ProjectsLoaded(projects));
+                            });
+                        }
+                        Err(e) => {
+                            self.popup = Some(Popup::Progress {
+                                message: format!("Save failed: {e}"),
+                            });
+                        }
+                    }
+                }
+            }
+
             Action::CycleSortOrder => {
                 if self.popup.is_some() {
                     return;
@@ -996,6 +1126,9 @@ impl App {
                             self.popup = Some(Popup::Progress {
                                 message: "Working...".to_string(),
                             });
+                        }
+                        Popup::ScanConfig { .. } => {
+                            // ScanConfig confirm is handled by the intercept block above
                         }
                     }
                 } else {

@@ -112,6 +112,8 @@ async fn main() -> Result<()> {
             Some(event_action) = events.next() => {
                 let action = if is_version_picker_active(&app) {
                     remap_version_picker_action(event_action)
+                } else if is_scan_config_active(&app) {
+                    remap_scan_config_action(event_action)
                 } else if app.search_active && app.popup.is_none() {
                     remap_search_action(event_action)
                 } else {
@@ -137,6 +139,27 @@ fn is_version_picker_active(app: &App) -> bool {
     matches!(app.popup, Some(Popup::VersionPicker { .. }))
 }
 
+fn is_scan_config_active(app: &App) -> bool {
+    matches!(app.popup, Some(Popup::ScanConfig { .. }))
+}
+
+/// In scan config popup mode, route chars to popup navigation/editing actions
+fn remap_scan_config_action(action: Action) -> Action {
+    match action {
+        Action::SearchInput(c) => match c {
+            'j' => Action::MoveDown,
+            'k' => Action::MoveUp,
+            'd' => Action::UninstallTool,
+            'a' => Action::InstallTool,
+            '+' => Action::SearchInput('+'),
+            '-' => Action::SearchInput('-'),
+            'q' | 'Q' => Action::CancelPopup,
+            other => Action::SearchInput(other), // for typing in add mode
+        },
+        other => other,
+    }
+}
+
 /// In normal mode, map char inputs to their bound actions
 fn remap_normal_action(action: Action) -> Action {
     match action {
@@ -157,6 +180,7 @@ fn remap_normal_action(action: Action) -> Action {
             't' => Action::TrustConfig,
             's' => Action::CycleSortOrder,
             'P' => Action::JumpToDriftProject,
+            'c' => Action::OpenScanConfig,
             _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)

@@ -57,6 +57,8 @@ pub enum Action {
     InstallProjectTools { path: String },
     UpdateProjectPins { path: String },
     CycleSortOrder,
+    OpenScanConfig,
+    SaveScanConfig,
 
     // Mouse / popup search
     MouseClick { x: u16, y: u16 },

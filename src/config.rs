@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MisetuiConfig {
     #[serde(default = "default_scan_dirs")]
     pub scan_dirs: Vec<PathBuf>,
@@ -48,5 +48,25 @@ impl MisetuiConfig {
         };
 
         toml::from_str(&contents).unwrap_or_default()
+    }
+
+    /// Save to ~/.config/misetui/config.toml. Creates directories if needed.
+    pub fn save(&self) -> Result<(), String> {
+        let config_path = dirs::config_dir()
+            .map(|d| d.join("misetui").join("config.toml"))
+            .ok_or_else(|| "Could not determine config directory".to_string())?;
+
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config dir: {e}"))?;
+        }
+
+        let contents = toml::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+
+        std::fs::write(&config_path, contents)
+            .map_err(|e| format!("Failed to write config: {e}"))?;
+
+        Ok(())
     }
 }
