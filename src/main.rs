@@ -79,7 +79,7 @@ fn remap_normal_action(action: Action) -> Action {
             'p' => Action::PruneTool,
             't' => Action::TrustConfig,
             's' => Action::CycleSortOrder,
-            _ => action, // unbound chars pass through to auto-start search
+            _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
         other @ Action::Confirm => other,
@@ -87,14 +87,19 @@ fn remap_normal_action(action: Action) -> Action {
     }
 }
 
-/// In search mode, let chars through as search input, remap special keys
+/// In search mode, let chars and navigation through; remap special keys
 fn remap_search_action(action: Action) -> Action {
     match action {
-        Action::SearchInput(_) => action, // all chars pass through
-        Action::Confirm => Action::ExitSearch, // Enter exits search
-        Action::CancelPopup => Action::CancelPopup,  // Esc exits search
+        Action::SearchInput(_) => action,
+        Action::Confirm => Action::ExitSearch,
+        Action::CancelPopup => Action::CancelPopup,
         Action::SearchBackspace => action,
-        _ => Action::None, // ignore navigation/actions in search mode
+        // Allow navigating the filtered list while searching
+        Action::MoveUp
+        | Action::MoveDown
+        | Action::PageUp
+        | Action::PageDown => action,
+        _ => Action::None,
     }
 }
 

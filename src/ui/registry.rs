@@ -1,3 +1,4 @@
+use super::highlight::highlight_cached;
 use crate::app::{App, LoadState};
 use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -19,7 +20,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             .split(area)
     };
 
-    // Search bar
     if app.search_active {
         let search_block = Block::default()
             .title(Span::styled(" Search ", theme::title()))
@@ -73,7 +73,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    // Build set of installed tool names for checkmark display
     let installed_names: HashSet<&str> = app.tools.iter().map(|t| t.name.as_str()).collect();
 
     let header = Row::new(vec![
@@ -87,7 +86,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let rows: Vec<Row> = entries
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(i, entry)| {
             let status_icon = if installed_names.contains(entry.short.as_str()) {
                 Cell::from(Span::styled("✓", theme::active_indicator()))
             } else {
@@ -104,9 +104,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 .take(60)
                 .collect::<String>();
 
+            let name_hl = app.registry_hl.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
             Row::new(vec![
                 status_icon,
-                Cell::from(Span::styled(&entry.short[..], theme::table_row())),
+                Cell::from(highlight_cached(&entry.short, name_hl, theme::table_row())),
                 Cell::from(Span::styled(backend, theme::muted())),
                 Cell::from(Span::styled(aliases, theme::muted())),
                 Cell::from(Span::styled(desc, theme::muted())),

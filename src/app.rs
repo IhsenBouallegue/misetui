@@ -1,8 +1,11 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
+
     ConfigFile, EnvVar, InstalledTool, MiseSetting, MiseTask, OutdatedTool, RegistryEntry,
 };
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -153,6 +156,14 @@ pub struct App {
     pub filtered_env: Vec<usize>,
     pub filtered_settings: Vec<usize>,
 
+    // Highlight index caches (parallel to filtered_* arrays, precomputed once per keystroke)
+    pub tools_hl: Vec<Vec<usize>>,
+    pub registry_hl: Vec<Vec<usize>>,
+    pub outdated_hl: Vec<Vec<usize>>,
+    pub tasks_hl: Vec<Vec<usize>>,
+    pub env_hl: Vec<Vec<usize>>,
+    pub settings_hl: Vec<Vec<usize>>,
+
     // Sorting
     pub sort_column: usize,
     pub sort_ascending: bool,
@@ -220,6 +231,13 @@ impl App {
             filtered_tasks: Vec::new(),
             filtered_env: Vec::new(),
             filtered_settings: Vec::new(),
+
+            tools_hl: Vec::new(),
+            registry_hl: Vec::new(),
+            outdated_hl: Vec::new(),
+            tasks_hl: Vec::new(),
+            env_hl: Vec::new(),
+            settings_hl: Vec::new(),
 
             sort_column: 0,
             sort_ascending: true,
@@ -322,11 +340,6 @@ impl App {
                 self.search_active = false;
             }
             Action::SearchInput(c) => {
-                if !self.search_active && self.popup.is_none() {
-                    // Auto-activate search on first unbound char
-                    self.search_active = true;
-                    self.search_query.clear();
-                }
                 if self.search_active {
                     self.search_query.push(c);
                     self.update_all_filters();
@@ -754,13 +767,8 @@ impl App {
                 }) = self.popup
                 {
                     search_query.push(c);
-                    let q = search_query.to_lowercase();
-                    *filtered_versions = versions
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, v)| v.to_lowercase().contains(&q))
-                        .map(|(i, _)| i)
-                        .collect();
+                    *filtered_versions =
+                        Self::fuzzy_filter_versions(versions, search_query);
                     *selected = 0;
                 }
             }
@@ -775,17 +783,8 @@ impl App {
                 }) = self.popup
                 {
                     search_query.pop();
-                    if search_query.is_empty() {
-                        *filtered_versions = (0..versions.len()).collect();
-                    } else {
-                        let q = search_query.to_lowercase();
-                        *filtered_versions = versions
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, v)| v.to_lowercase().contains(&q))
-                            .map(|(i, _)| i)
-                            .collect();
-                    }
+                    *filtered_versions =
+                        Self::fuzzy_filter_versions(versions, search_query);
                     *selected = 0;
                 }
             }
@@ -1092,147 +1091,212 @@ impl App {
     fn update_filtered_registry(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_registry = (0..self.registry.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_registry = self
-                .registry
-                .iter()
-                .enumerate()
-                .filter(|(_, entry)| {
-                    entry.short.to_lowercase().contains(&q)
-                        || entry
-                            .description
-                            .as_ref()
-                            .is_some_and(|d| d.to_lowercase().contains(&q))
-                        || entry.aliases.iter().any(|a| a.to_lowercase().contains(&q))
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.registry_hl = vec![vec![]; self.registry.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .registry
+            .iter()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                let name_result = matcher.fuzzy_indices(&entry.short, &q);
+                let desc_score = entry.description.as_deref()
+                    .and_then(|d| matcher.fuzzy_match(d, &q));
+                let alias_score = entry.aliases.iter()
+                    .filter_map(|a| matcher.fuzzy_match(a.as_str(), &q))
+                    .max();
+                let name_score = name_result.as_ref().map(|(s, _)| *s);
+                let best_score = [name_score, desc_score, alias_score]
+                    .into_iter().flatten().max()?;
+                let hl = name_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.registry_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_registry = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn update_filtered_tools(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_tools = (0..self.tools.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_tools = self
-                .tools
-                .iter()
-                .enumerate()
-                .filter(|(_, tool)| {
-                    tool.name.to_lowercase().contains(&q)
-                        || tool.version.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.tools_hl = vec![vec![]; self.tools.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .tools
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tool)| {
+                let name_result = matcher.fuzzy_indices(&tool.name, &q);
+                let ver_score = matcher.fuzzy_match(&tool.version, &q);
+                let name_score = name_result.as_ref().map(|(s, _)| *s);
+                let best_score = [name_score, ver_score].into_iter().flatten().max()?;
+                let hl = name_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.tools_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_tools = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn update_filtered_configs(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_configs = (0..self.configs.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_configs = self
-                .configs
-                .iter()
-                .enumerate()
-                .filter(|(_, cfg)| {
-                    cfg.path.to_lowercase().contains(&q)
-                        || cfg.tools.iter().any(|t| t.to_lowercase().contains(&q))
-                })
-                .map(|(i, _)| i)
-                .collect();
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize)> = self
+            .configs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, cfg)| {
+                let path_score = matcher.fuzzy_match(&cfg.path, &q);
+                let tool_score = cfg
+                    .tools
+                    .iter()
+                    .filter_map(|t| matcher.fuzzy_match(t, &q))
+                    .max();
+                let score = [path_score, tool_score].into_iter().flatten().max()?;
+                Some((score, i))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.filtered_configs = scored.into_iter().map(|(_, i)| i).collect();
     }
 
     fn update_filtered_doctor(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_doctor = (0..self.doctor_lines.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_doctor = self
-                .doctor_lines
-                .iter()
-                .enumerate()
-                .filter(|(_, line)| line.to_lowercase().contains(&q))
-                .map(|(i, _)| i)
-                .collect();
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize)> = self
+            .doctor_lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                let score = matcher.fuzzy_match(line, &q)?;
+                Some((score, i))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.filtered_doctor = scored.into_iter().map(|(_, i)| i).collect();
     }
 
     fn update_filtered_outdated(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_outdated = (0..self.outdated.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_outdated = self
-                .outdated
-                .iter()
-                .enumerate()
-                .filter(|(_, o)| {
-                    o.name.to_lowercase().contains(&q)
-                        || o.current.to_lowercase().contains(&q)
-                        || o.latest.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.outdated_hl = vec![vec![]; self.outdated.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .outdated
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| {
+                let name_result = matcher.fuzzy_indices(&o.name, &q);
+                let current_score = matcher.fuzzy_match(&o.current, &q);
+                let latest_score = matcher.fuzzy_match(&o.latest, &q);
+                let name_score = name_result.as_ref().map(|(s, _)| *s);
+                let best_score = [name_score, current_score, latest_score]
+                    .into_iter().flatten().max()?;
+                let hl = name_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.outdated_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_outdated = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn update_filtered_tasks(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_tasks = (0..self.tasks.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_tasks = self
-                .tasks
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| {
-                    t.name.to_lowercase().contains(&q)
-                        || t.description.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.tasks_hl = vec![vec![]; self.tasks.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let name_result = matcher.fuzzy_indices(&t.name, &q);
+                let desc_score = matcher.fuzzy_match(&t.description, &q);
+                let name_score = name_result.as_ref().map(|(s, _)| *s);
+                let best_score = [name_score, desc_score].into_iter().flatten().max()?;
+                let hl = name_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.tasks_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_tasks = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn update_filtered_env(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_env = (0..self.env_vars.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_env = self
-                .env_vars
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| {
-                    e.name.to_lowercase().contains(&q)
-                        || e.value.to_lowercase().contains(&q)
-                        || e.source.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.env_hl = vec![vec![]; self.env_vars.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .env_vars
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                let name_result = matcher.fuzzy_indices(&e.name, &q);
+                let value_score = matcher.fuzzy_match(&e.value, &q);
+                let source_score = matcher.fuzzy_match(&e.source, &q);
+                let name_score = name_result.as_ref().map(|(s, _)| *s);
+                let best_score = [name_score, value_score, source_score]
+                    .into_iter().flatten().max()?;
+                let hl = name_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.env_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_env = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn update_filtered_settings(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_settings = (0..self.settings.len()).collect();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.filtered_settings = self
-                .settings
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| {
-                    s.key.to_lowercase().contains(&q) || s.value.to_lowercase().contains(&q)
-                })
-                .map(|(i, _)| i)
-                .collect();
+            self.settings_hl = vec![vec![]; self.settings.len()];
+            return;
         }
+        let matcher = SkimMatcherV2::default();
+        let q = self.search_query.clone();
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .settings
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let key_result = matcher.fuzzy_indices(&s.key, &q);
+                let value_score = matcher.fuzzy_match(&s.value, &q);
+                let key_score = key_result.as_ref().map(|(sc, _)| *sc);
+                let best_score = [key_score, value_score].into_iter().flatten().max()?;
+                let hl = key_result.map(|(_, idx)| idx).unwrap_or_default();
+                Some((best_score, i, hl))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.settings_hl = scored.iter().map(|(_, _, hl)| hl.clone()).collect();
+        self.filtered_settings = scored.into_iter().map(|(_, i, _)| i).collect();
     }
 
     fn apply_sort(&mut self) {
@@ -1400,6 +1464,23 @@ impl App {
     pub fn spinner_char(&self) -> char {
         const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         SPINNER[self.spinner_frame]
+    }
+
+    fn fuzzy_filter_versions(versions: &[String], query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return (0..versions.len()).collect();
+        }
+        let matcher = SkimMatcherV2::default();
+        let mut scored: Vec<(i64, usize)> = versions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                let score = matcher.fuzzy_match(v, query)?;
+                Some((score, i))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, i)| i).collect()
     }
 
     pub fn outdated_count(&self) -> usize {

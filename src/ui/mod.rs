@@ -1,4 +1,5 @@
 mod config;
+pub(super) mod highlight;
 mod doctor;
 mod environment;
 mod footer;

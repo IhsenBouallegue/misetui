@@ -1,3 +1,4 @@
+use super::highlight::highlight_cached;
 use crate::app::{App, LoadState};
 use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -83,10 +84,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let rows: Vec<Row> = settings
         .iter()
-        .map(|setting| {
+        .enumerate()
+        .map(|(i, setting)| {
             let value_truncated: String = setting.value.chars().take(60).collect();
+            let key_hl = app.settings_hl.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
             Row::new(vec![
-                Cell::from(Span::styled(&setting.key[..], theme::table_row())),
+                Cell::from(highlight_cached(&setting.key, key_hl, theme::table_row())),
                 Cell::from(Span::styled(value_truncated, theme::table_row())),
                 Cell::from(Span::styled(&setting.value_type[..], theme::muted())),
             ])

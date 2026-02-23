@@ -87,3 +87,7 @@ pub fn popup_bg() -> Style {
 pub fn progress() -> Style {
     Style::default().fg(RED)
 }
+
+pub fn match_highlight() -> Style {
+    Style::default().fg(YELLOW).add_modifier(Modifier::BOLD)
+}

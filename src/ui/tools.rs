@@ -1,3 +1,4 @@
+use super::highlight::highlight_cached;
 use crate::app::{App, LoadState};
 use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -19,7 +20,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             .split(area)
     };
 
-    // Search bar
     if app.search_active {
         let search_block = Block::default()
             .title(Span::styled(" Search ", theme::title()))
@@ -86,33 +86,35 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let rows: Vec<Row> = tools
         .iter()
-        .map(|tool| {
+        .enumerate()
+        .map(|(i, tool)| {
             let status = if tool.active {
                 Cell::from(Span::styled("● active", theme::active_indicator()))
             } else {
                 Cell::from(Span::styled("○ inactive", theme::inactive_indicator()))
             };
 
-            // Check if tool is outdated and show marker
+            // Version cell: show outdated arrow if applicable
             let version_cell =
                 if let Some(outdated) = app.outdated_map.get(&tool.name) {
                     if outdated.current == tool.version && outdated.latest != tool.version {
                         Cell::from(Line::from(vec![
-                            Span::styled(&tool.version[..], theme::table_row()),
+                            Span::styled(tool.version.clone(), theme::table_row()),
                             Span::styled(
                                 format!(" → {}", outdated.latest),
                                 Style::default().fg(theme::YELLOW),
                             ),
                         ]))
                     } else {
-                        Cell::from(Span::styled(&tool.version[..], theme::table_row()))
+                        Cell::from(Span::styled(tool.version.clone(), theme::table_row()))
                     }
                 } else {
-                    Cell::from(Span::styled(&tool.version[..], theme::table_row()))
+                    Cell::from(Span::styled(tool.version.clone(), theme::table_row()))
                 };
 
+            let name_hl = app.tools_hl.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
             Row::new(vec![
-                Cell::from(Span::styled(&tool.name[..], theme::table_row())),
+                Cell::from(highlight_cached(&tool.name, name_hl, theme::table_row())),
                 version_cell,
                 status,
                 Cell::from(Span::styled(&tool.source[..], theme::muted())),

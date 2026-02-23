@@ -1,3 +1,4 @@
+use super::highlight::highlight_cached;
 use crate::app::{App, LoadState};
 use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -84,14 +85,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     let rows: Vec<Row> = outdated
         .iter()
-        .map(|tool| {
+        .enumerate()
+        .map(|(i, tool)| {
+            let name_hl = app.outdated_hl.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
             Row::new(vec![
-                Cell::from(Span::styled(&tool.name[..], theme::table_row())),
-                Cell::from(Span::styled(&tool.current[..], theme::table_row())),
-                Cell::from(Span::styled(
-                    &tool.latest[..],
-                    theme::active_indicator(),
-                )),
+                Cell::from(highlight_cached(&tool.name, name_hl, theme::table_row())),
+                Cell::from(Span::styled(tool.current.clone(), theme::table_row())),
+                Cell::from(Span::styled(tool.latest.clone(), theme::active_indicator())),
                 Cell::from(Span::styled(&tool.requested[..], theme::muted())),
             ])
         })
