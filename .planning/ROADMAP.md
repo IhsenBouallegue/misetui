@@ -79,7 +79,12 @@ Plans:
   3. User can add and edit `[env]` key/value entries with `A`/`e` and `[tasks]` name/command entries with `T`/`e`
   4. User presses `w` to write changes; file is written atomically (temp file + rename) via `toml_edit`, original formatting and comments are preserved, and a success message is shown
   5. After a successful write, the app refreshes config and tools state automatically
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — toml_edit dependency, EditorState/EditorTab/EditorRow model types, parse_config_for_editor() and write_editor_changes() in mise.rs, Popup::Editor variant, OpenEditor action wiring
+- [ ] 04-02-PLAN.md — remap_editor_action/remap_editor_edit_action, editor intercept block in handle_action, all edit/add/delete/write behavior, unsaved changes guard, ConfirmAction::DiscardEditor
+- [ ] 04-03-PLAN.md — src/ui/editor.rs popup renderer (sub-tabs, table rows, inline edit cursor, change markers), popup.rs Editor arm, footer/help updates + human verification checkpoint
 
 ## Progress
 
@@ -91,4 +96,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Projects Tab | 4/5 | Complete    | 2026-02-23 |
 | 2. Drift Indicator | 3/3 | Complete    | 2026-02-23 |
 | 3. Bootstrap Wizard | 3/3 | Complete   | 2026-02-23 |
-| 4. Inline Editor | 0/TBD | Not started | - |
+| 4. Inline Editor | 0/3 | Not started | - |
