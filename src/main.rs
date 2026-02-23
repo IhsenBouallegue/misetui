@@ -114,6 +114,8 @@ async fn main() -> Result<()> {
                     remap_version_picker_action(event_action)
                 } else if is_scan_config_active(&app) {
                     remap_scan_config_action(event_action)
+                } else if is_wizard_active(&app) {
+                    remap_wizard_action(event_action)
                 } else if app.search_active && app.popup.is_none() {
                     remap_search_action(event_action)
                 } else {
@@ -141,6 +143,30 @@ fn is_version_picker_active(app: &App) -> bool {
 
 fn is_scan_config_active(app: &App) -> bool {
     matches!(app.popup, Some(Popup::ScanConfig { .. }))
+}
+
+fn is_wizard_active(app: &App) -> bool {
+    matches!(app.popup, Some(Popup::Wizard(_)))
+}
+
+/// In wizard popup mode, route chars to wizard navigation actions
+fn remap_wizard_action(action: Action) -> Action {
+    match action {
+        Action::SearchInput(c) => match c {
+            'j' => Action::MoveDown,
+            'k' => Action::MoveUp,
+            ' ' => Action::WizardToggleTool,
+            'a' => Action::WizardToggleAgentFiles,
+            'n' => Action::WizardNextStep,
+            'p' => Action::WizardPrevStep,
+            'q' | 'Q' => Action::CancelPopup,
+            _ => Action::None,
+        },
+        Action::Confirm => Action::WizardNextStep,
+        Action::CancelPopup => Action::CancelPopup,
+        Action::MoveUp | Action::MoveDown | Action::PageUp | Action::PageDown => action,
+        _ => Action::None,
+    }
 }
 
 /// In scan config popup mode, route chars to popup navigation/editing actions
@@ -181,6 +207,7 @@ fn remap_normal_action(action: Action) -> Action {
             's' => Action::CycleSortOrder,
             'P' => Action::JumpToDriftProject,
             'c' => Action::OpenScanConfig,
+            'B' => Action::OpenWizard,
             _ => Action::None, // unbound chars do nothing; use / to search
         },
         // Enter is handled contextually in app.rs (popup confirm, tool detail, run task)
