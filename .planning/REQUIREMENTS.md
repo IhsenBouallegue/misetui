@@ -24,9 +24,9 @@
 
 ### Bootstrap Wizard
 
-- [ ] **BOOT-01**: User can open a bootstrap wizard with `B` from any tab to generate a `.mise.toml` for the current working directory (or a selected project with no config)
-- [ ] **BOOT-02**: Wizard auto-detects project type from filesystem files (package.json → node/pnpm, Cargo.toml → rust, pyproject.toml/requirements.txt → python/uv, go.mod → go, Gemfile → ruby, composer.json → php)
-- [ ] **BOOT-03**: Wizard migrates pins from legacy files (`.nvmrc`, `.python-version`, `.ruby-version`, `.tool-versions`) preserving exact versions
+- [x] **BOOT-01**: User can open a bootstrap wizard with `B` from any tab to generate a `.mise.toml` for the current working directory (or a selected project with no config)
+- [x] **BOOT-02**: Wizard auto-detects project type from filesystem files (package.json → node/pnpm, Cargo.toml → rust, pyproject.toml/requirements.txt → python/uv, go.mod → go, Gemfile → ruby, composer.json → php)
+- [x] **BOOT-03**: Wizard migrates pins from legacy files (`.nvmrc`, `.python-version`, `.ruby-version`, `.tool-versions`) preserving exact versions
 - [ ] **BOOT-04**: User can toggle/add tools in the Review step before writing the config
 - [ ] **BOOT-05**: User can preview the generated `.mise.toml` content before writing
 - [ ] **BOOT-06**: Wizard writes `.mise.toml` and immediately runs `mise install` in the target directory, streaming progress via the existing popup
@@ -89,9 +89,9 @@
 | DRFT-01 | Phase 2 | Complete |
 | DRFT-02 | Phase 2 | Complete |
 | DRFT-03 | Phase 2 | Complete |
-| BOOT-01 | Phase 3 | Pending |
-| BOOT-02 | Phase 3 | Pending |
-| BOOT-03 | Phase 3 | Pending |
+| BOOT-01 | Phase 3 | Complete |
+| BOOT-02 | Phase 3 | Complete |
+| BOOT-03 | Phase 3 | Complete |
 | BOOT-04 | Phase 3 | Pending |
 | BOOT-05 | Phase 3 | Pending |
 | BOOT-06 | Phase 3 | Pending |

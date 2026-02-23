@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-23)
 
 **Core value:** See all your project environments at a glance and act on them without leaving the terminal.
-**Current focus:** Phase 2 — Drift Indicator
+**Current focus:** Phase 3 — Bootstrap Wizard
 
 ## Current Position
 
-Phase: 1 of 4 (Projects Tab) — COMPLETE; Phase 2 (Drift Indicator) also complete
-Plan: 5 of 5 complete in phase 01
-Status: Phase 01 Complete — all 5 plans done
-Last activity: 2026-02-23 — Completed 01-05-PLAN.md (Scan config popup)
+Phase: 3 of 4 (Bootstrap Wizard) — IN PROGRESS; Phase 1 (Projects Tab) and Phase 2 (Drift Indicator) complete
+Plan: 1 of 3 complete in phase 03
+Status: Phase 03 Plan 01 Complete — wizard data model and detection logic done
+Last activity: 2026-02-23 — Completed 03-01-PLAN.md (WizardState model + detect_project_tools/migrate_legacy_pins)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 58%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
+- Total plans completed: 5
 - Average duration: 2 min
-- Total execution time: 8 min
+- Total execution time: 9 min
 
 **By Phase:**
 
@@ -29,9 +29,10 @@ Progress: [█████░░░░░] 50%
 |-------|-------|-------|----------|
 | 01-projects-tab | 3 | 3 min | 1 min |
 | 02-drift-indicator | 3 | 7 min | 2.3 min |
+| 03-bootstrap-wizard | 1 | 1 min | 1 min |
 
 **Recent Trend:**
-- Last 5 plans: 10 min (01-02), 1 min (02-01), 2 min (02-02), 4 min (02-03), 1 min (01-03)
+- Last 5 plans: 1 min (02-01), 2 min (02-02), 4 min (02-03), 1 min (01-03), 1 min (03-01)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -56,6 +57,7 @@ Recent decisions affecting current work:
 - [Phase 01-projects-tab plan 02]: Tab::Projects at index 7, Doctor shifts to 8; projects_drill_active flag for drill-down navigation; dual-field fuzzy search (name+path, best score, name highlights); JumpToDriftProject now navigates to Tab::Projects directly
 - [Phase 01-projects-tab plan 03]: render_list/render_drill_down split pattern; health_style() maps ProjectHealthStatus to GREEN/YELLOW/RED/MUTED; path display truncated to last 3 components with ellipsis; Task 1 was pre-satisfied by 01-02 compile stubs
 - [Phase 01-projects-tab plan 05]: ScanConfig popup intercept block before main handle_action match; remap_scan_config_action routes d/a/q keys; MisetuiConfig::save() uses toml::to_string_pretty with Serialize derive; render_scan_config implemented in Task 2 commit to fix non-exhaustive match compile errors from Task 1
+- [Phase 03-bootstrap-wizard plan 01]: DetectedTool::installed populated by cross-referencing mise ls -J output; migrate_legacy_pins() sync, detect_project_tools() async; version fallbacks: node=lts, python/go/ruby/php=latest, rust=stable; priority: .tool-versions < filesystem indicators < standalone pin files
 
 ### Pending Todos
 
@@ -68,5 +70,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 01-projects-tab-01-05-PLAN.md (Scan config popup — Phase 01 fully complete)
+Stopped at: Completed 03-01-PLAN.md (Bootstrap Wizard data model and detection logic)
 Resume file: None
