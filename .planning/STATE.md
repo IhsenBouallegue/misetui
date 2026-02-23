@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 ## Current Position
 
 Phase: 3 of 4 (Bootstrap Wizard) — IN PROGRESS; Phase 1 (Projects Tab) and Phase 2 (Drift Indicator) complete
-Plan: 1 of 3 complete in phase 03
-Status: Phase 03 Plan 01 Complete — wizard data model and detection logic done
-Last activity: 2026-02-23 — Completed 03-01-PLAN.md (WizardState model + detect_project_tools/migrate_legacy_pins)
+Plan: 2 of 3 complete in phase 03
+Status: Phase 03 Plan 02 Complete — wizard wiring (actions, Popup::Wizard, write/install, B keybinding)
+Last activity: 2026-02-23 — Completed 03-02-PLAN.md (Bootstrap Wizard wiring — B keybinding, intercept block, write_mise_toml, render_wizard)
 
-Progress: [██████░░░░] 58%
+Progress: [███████░░░] 64%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
+- Total plans completed: 6
 - Average duration: 2 min
-- Total execution time: 9 min
+- Total execution time: 12 min
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [██████░░░░] 58%
 |-------|-------|-------|----------|
 | 01-projects-tab | 3 | 3 min | 1 min |
 | 02-drift-indicator | 3 | 7 min | 2.3 min |
-| 03-bootstrap-wizard | 1 | 1 min | 1 min |
+| 03-bootstrap-wizard | 2 | 4 min | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 1 min (02-01), 2 min (02-02), 4 min (02-03), 1 min (01-03), 1 min (03-01)
+- Last 5 plans: 2 min (02-02), 4 min (02-03), 1 min (01-03), 1 min (03-01), 3 min (03-02)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -58,6 +58,9 @@ Recent decisions affecting current work:
 - [Phase 01-projects-tab plan 03]: render_list/render_drill_down split pattern; health_style() maps ProjectHealthStatus to GREEN/YELLOW/RED/MUTED; path display truncated to last 3 components with ellipsis; Task 1 was pre-satisfied by 01-02 compile stubs
 - [Phase 01-projects-tab plan 05]: ScanConfig popup intercept block before main handle_action match; remap_scan_config_action routes d/a/q keys; MisetuiConfig::save() uses toml::to_string_pretty with Serialize derive; render_scan_config implemented in Task 2 commit to fix non-exhaustive match compile errors from Task 1
 - [Phase 03-bootstrap-wizard plan 01]: DetectedTool::installed populated by cross-referencing mise ls -J output; migrate_legacy_pins() sync, detect_project_tools() async; version fallbacks: node=lts, python/go/ruby/php=latest, rust=stable; priority: .tool-versions < filesystem indicators < standalone pin files
+- [Phase 03-bootstrap-wizard]: render_wizard() added to ui/popup.rs as Rule 3 auto-fix (non-exhaustive match on new Popup::Wizard variant)
+- [Phase 03-bootstrap-wizard]: Wizard intercept block intercepts Action::Confirm (Enter) and WizardNextStep to advance steps — matches ScanConfig intercept pattern
+- [Phase 03-bootstrap-wizard]: write_agent_files_for() silently ignores write errors — non-critical BOOT-07 feature
 
 ### Pending Todos
 
@@ -70,5 +73,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 03-01-PLAN.md (Bootstrap Wizard data model and detection logic)
+Stopped at: Completed 03-02-PLAN.md (Bootstrap Wizard wiring — actions, Popup::Wizard, write/install, B keybinding)
 Resume file: None
