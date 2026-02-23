@@ -334,6 +334,15 @@ impl App {
             let state = mise::check_cwd_drift().await.unwrap_or(DriftState::NoConfig);
             let _ = tx.send(Action::DriftChecked(state));
         });
+
+        // Projects: load config and scan synchronously inside spawn (filesystem I/O only)
+        let tx = self.action_tx.clone();
+        let tools_snapshot = self.tools.clone();
+        tokio::spawn(async move {
+            let config = crate::config::MisetuiConfig::load();
+            let projects = mise::scan_projects(&config, &tools_snapshot);
+            let _ = tx.send(Action::ProjectsLoaded(projects));
+        });
     }
 
     pub fn handle_action(&mut self, action: Action) {
