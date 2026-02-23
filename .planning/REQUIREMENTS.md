@@ -19,7 +19,7 @@
 
 - [x] **DRFT-01**: User sees a persistent health indicator in the header bar showing whether the CWD's tool requirements match what is installed (healthy / drifted / missing / no-config / checking states)
 - [x] **DRFT-02**: Indicator updates live when `.mise.toml` or `~/.config/mise/config.toml` changes on disk — no manual refresh required
-- [ ] **DRFT-03**: User can press `?` on the drift indicator to jump to the Projects drill-down for the current project
+- [x] **DRFT-03**: User can press `?` on the drift indicator to jump to the Projects drill-down for the current project
 
 ### Bootstrap Wizard
 
@@ -86,7 +86,7 @@
 | PROJ-07 | Phase 1 | Pending |
 | DRFT-01 | Phase 2 | Complete |
 | DRFT-02 | Phase 2 | Complete |
-| DRFT-03 | Phase 2 | Pending |
+| DRFT-03 | Phase 2 | Complete |
 | BOOT-01 | Phase 3 | Pending |
 | BOOT-02 | Phase 3 | Pending |
 | BOOT-03 | Phase 3 | Pending |
