@@ -214,3 +214,16 @@ pub struct PruneCandidate {
     pub tool: String,
     pub version: String,
 }
+
+/// Health state of the current working directory's tool requirements.
+/// Checking = async check in flight; Healthy = all tools present and correct version;
+/// Drifted = at least one tool version mismatch; Missing = at least one tool not installed;
+/// NoConfig = no .mise.toml or global config applies to CWD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftState {
+    Checking,
+    Healthy,
+    Drifted,
+    Missing,
+    NoConfig,
+}
