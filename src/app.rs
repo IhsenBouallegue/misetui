@@ -347,14 +347,7 @@ impl App {
             let _ = tx.send(Action::DriftChecked(state));
         });
 
-        // Projects: load config and scan synchronously inside spawn (filesystem I/O only)
-        let tx = self.action_tx.clone();
-        let tools_snapshot = self.tools.clone();
-        tokio::spawn(async move {
-            let config = crate::config::MisetuiConfig::load();
-            let projects = mise::scan_projects(&config, &tools_snapshot);
-            let _ = tx.send(Action::ProjectsLoaded(projects));
-        });
+        // Projects are scanned in the ToolsLoaded handler once the tools list is populated.
     }
 
     pub fn handle_action(&mut self, action: Action) {
@@ -476,6 +469,15 @@ impl App {
                 self.tools = tools;
                 self.tools_state = LoadState::Loaded;
                 self.update_filtered_tools();
+                // Re-scan projects now that we have a populated tools list.
+                // scan_projects at startup used an empty snapshot; this corrects it.
+                let tx = self.action_tx.clone();
+                let tools_snapshot = self.tools.clone();
+                tokio::spawn(async move {
+                    let config = crate::config::MisetuiConfig::load();
+                    let projects = crate::mise::scan_projects(&config, &tools_snapshot);
+                    let _ = tx.send(Action::ProjectsLoaded(projects));
+                });
             }
             Action::RegistryLoaded(registry) => {
                 self.registry = registry;
