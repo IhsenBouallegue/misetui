@@ -46,6 +46,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     hints.push(("p", "prune"));
+    hints.push(("B", "bootstrap wizard"));
 
     if app.search_active {
         hints = vec![("Esc", "cancel search"), ("Type", "to filter")];

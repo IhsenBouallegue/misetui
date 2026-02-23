@@ -13,6 +13,7 @@ mod settings;
 mod sidebar;
 mod tasks;
 mod tools;
+pub(crate) mod wizard;
 
 use crate::app::{App, Tab};
 use layout::AppLayout;
