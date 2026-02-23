@@ -383,22 +383,27 @@ pub async fn check_cwd_drift() -> Result<DriftState, String> {
         return Ok(DriftState::NoConfig);
     }
 
-    if stderr.to_lowercase().contains("no config")
-        || stderr.to_lowercase().contains("not found")
+    let stderr_lc = stderr.to_lowercase();
+    let stdout_lc = stdout.to_lowercase();
+
+    if stderr_lc.contains("no config")
+        || stderr_lc.contains("not found")
+        || stderr_lc.contains("no tasks defined")
+        || stderr_lc.contains("are you in a project directory")
     {
         return Ok(DriftState::NoConfig);
     }
 
     if !output.status.success() {
         // Non-zero exit means a tool is missing or drifted — check for "missing" keyword.
-        if stderr.to_lowercase().contains("missing") || stdout.to_lowercase().contains("missing") {
+        if stderr_lc.contains("missing") || stdout_lc.contains("missing") {
             return Ok(DriftState::Missing);
         }
         return Ok(DriftState::Drifted);
     }
 
     // Exit 0 — tools are present. Double-check stdout for any "missing" keyword as a safeguard.
-    if stdout.to_lowercase().contains("missing") {
+    if stdout_lc.contains("missing") {
         return Ok(DriftState::Missing);
     }
 
