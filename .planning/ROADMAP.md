@@ -62,7 +62,12 @@ Plans:
   2. User can review and toggle the tool list, preview the generated `.mise.toml` content, then confirm — config is written and `mise install` runs with streaming progress
   3. Legacy version pins from `.nvmrc`, `.python-version`, `.ruby-version`, and `.tool-versions` are carried over with exact versions preserved
   4. Optionally, `AGENTS.md` and `CLAUDE.md` agent instruction files are written alongside `.mise.toml`
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — WizardState/WizardStep/DetectedTool model types, detect_project_tools() and migrate_legacy_pins() in mise.rs
+- [ ] 03-02-PLAN.md — Popup::Wizard in app.rs, Action enum additions, handle_action wizard arms, B keybinding, remap_wizard_action, write/install mise functions
+- [ ] 03-03-PLAN.md — src/ui/wizard.rs renderer (all 4 steps), popup.rs Wizard arm, mod.rs declaration, help text update + human verification checkpoint
 
 ### Phase 4: Inline Editor
 **Goal**: Users can add, edit, and delete tools, env vars, and tasks in any `.mise.toml` directly from the TUI without touching a text editor
@@ -85,5 +90,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Projects Tab | 4/5 | Complete    | 2026-02-23 |
 | 2. Drift Indicator | 3/3 | Complete    | 2026-02-23 |
-| 3. Bootstrap Wizard | 0/TBD | Not started | - |
+| 3. Bootstrap Wizard | 0/3 | Not started | - |
 | 4. Inline Editor | 0/TBD | Not started | - |
