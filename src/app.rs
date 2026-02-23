@@ -1,8 +1,9 @@
 use crate::action::Action;
 use crate::mise;
 use crate::model::{
-    ConfigFile, DriftState, EditorState, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask,
-    OutdatedTool, RegistryEntry, WizardState, WizardStep,
+    ConfigFile, DriftState, EditorEnvRow, EditorRowStatus, EditorState, EditorTab, EditorTaskRow,
+    EditorToolRow, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask, OutdatedTool,
+    RegistryEntry, WizardState, WizardStep,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -118,6 +119,8 @@ pub enum ConfirmAction {
     Prune,
     TrustConfig { path: String },
     RunTask { task: String },
+    /// User confirmed discarding unsaved editor changes
+    DiscardEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,6 +374,350 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
+        // Editor popup intercept — handles all editor-mode actions before normal routing
+        if let Some(Popup::Editor(ref mut state)) = &mut self.popup {
+            match &action {
+                Action::MoveUp => {
+                    if !state.editing {
+                        if state.selected > 0 { state.selected -= 1; }
+                    }
+                    return;
+                }
+                Action::MoveDown => {
+                    if !state.editing {
+                        let len = match state.tab {
+                            EditorTab::Tools => state.tools.len(),
+                            EditorTab::Env => state.env_vars.len(),
+                            EditorTab::Tasks => state.tasks.len(),
+                        };
+                        if len > 0 && state.selected + 1 < len { state.selected += 1; }
+                    }
+                    return;
+                }
+                Action::PageUp => {
+                    if !state.editing {
+                        state.selected = state.selected.saturating_sub(10);
+                    }
+                    return;
+                }
+                Action::PageDown => {
+                    if !state.editing {
+                        let len = match state.tab {
+                            EditorTab::Tools => state.tools.len(),
+                            EditorTab::Env => state.env_vars.len(),
+                            EditorTab::Tasks => state.tasks.len(),
+                        };
+                        if len > 0 { state.selected = (state.selected + 10).min(len - 1); }
+                    }
+                    return;
+                }
+                Action::EditorSwitchTab => {
+                    if !state.editing {
+                        state.tab = match state.tab {
+                            EditorTab::Tools => EditorTab::Env,
+                            EditorTab::Env => EditorTab::Tasks,
+                            EditorTab::Tasks => EditorTab::Tools,
+                        };
+                        state.selected = 0;
+                    }
+                    return;
+                }
+                Action::EditorStartEdit => {
+                    if !state.editing {
+                        let has_row = match state.tab {
+                            EditorTab::Tools => !state.tools.is_empty(),
+                            EditorTab::Env => !state.env_vars.is_empty(),
+                            EditorTab::Tasks => !state.tasks.is_empty(),
+                        };
+                        if has_row {
+                            state.editing = true;
+                            state.edit_column = 1; // version/value/command column
+                            state.edit_buffer = match state.tab {
+                                EditorTab::Tools => state.tools[state.selected].version.clone(),
+                                EditorTab::Env => state.env_vars[state.selected].value.clone(),
+                                EditorTab::Tasks => state.tasks[state.selected].command.clone(),
+                            };
+                        }
+                    }
+                    return;
+                }
+                Action::EditorConfirmEdit => {
+                    if state.editing {
+                        let buf = state.edit_buffer.clone();
+                        let col = state.edit_column;
+                        match state.tab {
+                            EditorTab::Tools => {
+                                if let Some(row) = state.tools.get_mut(state.selected) {
+                                    // Tools only have column 1 (version) for editing via 'e'
+                                    // Column 0 (name) is used when adding a new tool row
+                                    if col == 0 {
+                                        if row.name != buf {
+                                            row.name = buf.clone();
+                                            if row.status == EditorRowStatus::Unchanged {
+                                                row.status = EditorRowStatus::Modified;
+                                            }
+                                            state.dirty = true;
+                                        }
+                                    } else if row.version != buf {
+                                        row.version = buf.clone();
+                                        if row.status == EditorRowStatus::Unchanged {
+                                            row.status = EditorRowStatus::Modified;
+                                        }
+                                        state.dirty = true;
+                                    }
+                                }
+                            }
+                            EditorTab::Env => {
+                                if let Some(row) = state.env_vars.get_mut(state.selected) {
+                                    if col == 0 {
+                                        if row.key != buf {
+                                            row.key = buf.clone();
+                                            if row.status == EditorRowStatus::Unchanged {
+                                                row.status = EditorRowStatus::Modified;
+                                            }
+                                            state.dirty = true;
+                                        }
+                                    } else if row.value != buf {
+                                        row.value = buf.clone();
+                                        if row.status == EditorRowStatus::Unchanged {
+                                            row.status = EditorRowStatus::Modified;
+                                        }
+                                        state.dirty = true;
+                                    }
+                                }
+                            }
+                            EditorTab::Tasks => {
+                                if let Some(row) = state.tasks.get_mut(state.selected) {
+                                    if col == 0 {
+                                        if row.name != buf {
+                                            row.name = buf.clone();
+                                            if row.status == EditorRowStatus::Unchanged {
+                                                row.status = EditorRowStatus::Modified;
+                                            }
+                                            state.dirty = true;
+                                        }
+                                    } else if row.command != buf {
+                                        row.command = buf.clone();
+                                        if row.status == EditorRowStatus::Unchanged {
+                                            row.status = EditorRowStatus::Modified;
+                                        }
+                                        state.dirty = true;
+                                    }
+                                }
+                            }
+                        }
+                        // If we just finished editing column 0 (name/key) on a newly Added row,
+                        // auto-advance to column 1 (version/value/command) so user can fill it in
+                        if col == 0 {
+                            let is_added = match state.tab {
+                                EditorTab::Tools => state.tools.get(state.selected)
+                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
+                                EditorTab::Env => state.env_vars.get(state.selected)
+                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
+                                EditorTab::Tasks => state.tasks.get(state.selected)
+                                    .map(|r| r.status == EditorRowStatus::Added).unwrap_or(false),
+                            };
+                            if is_added {
+                                state.edit_column = 1;
+                                state.editing = true;
+                                state.edit_buffer = match state.tab {
+                                    EditorTab::Tools => state.tools[state.selected].version.clone(),
+                                    EditorTab::Env => state.env_vars[state.selected].value.clone(),
+                                    EditorTab::Tasks => state.tasks[state.selected].command.clone(),
+                                };
+                                return;
+                            }
+                        }
+                        state.editing = false;
+                        state.edit_buffer.clear();
+                    }
+                    return;
+                }
+                Action::EditorCancelEdit => {
+                    if state.editing {
+                        state.editing = false;
+                        state.edit_buffer.clear();
+                    }
+                    return;
+                }
+                Action::EditorInput(c) => {
+                    if state.editing {
+                        state.edit_buffer.push(*c);
+                    }
+                    return;
+                }
+                Action::EditorBackspace => {
+                    if state.editing {
+                        state.edit_buffer.pop();
+                    }
+                    return;
+                }
+                Action::EditorDeleteRow => {
+                    if !state.editing {
+                        match state.tab {
+                            EditorTab::Tools => {
+                                if let Some(row) = state.tools.get_mut(state.selected) {
+                                    if row.status == EditorRowStatus::Added {
+                                        state.tools.remove(state.selected);
+                                        if state.selected >= state.tools.len() && !state.tools.is_empty() {
+                                            state.selected = state.tools.len() - 1;
+                                        }
+                                    } else {
+                                        row.status = EditorRowStatus::Deleted;
+                                    }
+                                    state.dirty = true;
+                                }
+                            }
+                            EditorTab::Env => {
+                                if let Some(row) = state.env_vars.get_mut(state.selected) {
+                                    if row.status == EditorRowStatus::Added {
+                                        state.env_vars.remove(state.selected);
+                                        if state.selected >= state.env_vars.len() && !state.env_vars.is_empty() {
+                                            state.selected = state.env_vars.len() - 1;
+                                        }
+                                    } else {
+                                        row.status = EditorRowStatus::Deleted;
+                                    }
+                                    state.dirty = true;
+                                }
+                            }
+                            EditorTab::Tasks => {
+                                if let Some(row) = state.tasks.get_mut(state.selected) {
+                                    if row.status == EditorRowStatus::Added {
+                                        state.tasks.remove(state.selected);
+                                        if state.selected >= state.tasks.len() && !state.tasks.is_empty() {
+                                            state.selected = state.tasks.len() - 1;
+                                        }
+                                    } else {
+                                        row.status = EditorRowStatus::Deleted;
+                                    }
+                                    state.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                Action::EditorAddTool => {
+                    if !state.editing {
+                        match state.tab {
+                            EditorTab::Tools => {
+                                // Add an empty tool row and start editing the name column
+                                state.tools.push(EditorToolRow {
+                                    name: String::new(),
+                                    version: "latest".to_string(),
+                                    status: EditorRowStatus::Added,
+                                    original_name: None,
+                                });
+                                state.selected = state.tools.len() - 1;
+                                state.editing = true;
+                                state.edit_column = 0; // editing name first
+                                state.edit_buffer.clear();
+                                state.dirty = true;
+                            }
+                            EditorTab::Env => {
+                                // 'a' on Env sub-tab also adds env var
+                                state.env_vars.push(EditorEnvRow {
+                                    key: String::new(),
+                                    value: String::new(),
+                                    status: EditorRowStatus::Added,
+                                    original_key: None,
+                                });
+                                state.selected = state.env_vars.len() - 1;
+                                state.editing = true;
+                                state.edit_column = 0;
+                                state.edit_buffer.clear();
+                                state.dirty = true;
+                            }
+                            EditorTab::Tasks => {
+                                // 'a' on Tasks sub-tab adds task
+                                state.tasks.push(EditorTaskRow {
+                                    name: String::new(),
+                                    command: String::new(),
+                                    status: EditorRowStatus::Added,
+                                    original_name: None,
+                                });
+                                state.selected = state.tasks.len() - 1;
+                                state.editing = true;
+                                state.edit_column = 0;
+                                state.edit_buffer.clear();
+                                state.dirty = true;
+                            }
+                        }
+                    }
+                    return;
+                }
+                Action::EditorAddEnvVar => {
+                    if !state.editing {
+                        // Explicit 'A' always adds env var regardless of current sub-tab
+                        state.env_vars.push(EditorEnvRow {
+                            key: String::new(),
+                            value: String::new(),
+                            status: EditorRowStatus::Added,
+                            original_key: None,
+                        });
+                        state.selected = state.env_vars.len() - 1;
+                        state.tab = EditorTab::Env;
+                        state.editing = true;
+                        state.edit_column = 0;
+                        state.edit_buffer.clear();
+                        state.dirty = true;
+                    }
+                    return;
+                }
+                Action::EditorAddTask => {
+                    if !state.editing {
+                        // Explicit 'T' always adds task regardless of current sub-tab
+                        state.tasks.push(EditorTaskRow {
+                            name: String::new(),
+                            command: String::new(),
+                            status: EditorRowStatus::Added,
+                            original_name: None,
+                        });
+                        state.selected = state.tasks.len() - 1;
+                        state.tab = EditorTab::Tasks;
+                        state.editing = true;
+                        state.edit_column = 0;
+                        state.edit_buffer.clear();
+                        state.dirty = true;
+                    }
+                    return;
+                }
+                Action::EditorWrite => {
+                    if !state.editing {
+                        let editor_state = state.as_ref().clone();
+                        let tx = self.action_tx.clone();
+                        self.popup = Some(Popup::Progress {
+                            message: format!("Writing {}...", editor_state.file_path),
+                        });
+                        tokio::spawn(async move {
+                            match crate::mise::write_editor_changes(&editor_state).await {
+                                Ok(msg) => { let _ = tx.send(Action::EditorWriteComplete(msg)); }
+                                Err(e)  => { let _ = tx.send(Action::OperationFailed(e)); }
+                            }
+                        });
+                    }
+                    return;
+                }
+                Action::EditorClose => {
+                    if !state.editing {
+                        if state.dirty {
+                            // Clone file_path to avoid borrow conflict
+                            let _ = state.file_path.clone();
+                            self.popup = Some(Popup::Confirm {
+                                message: "Unsaved changes. Discard? (Enter=yes, Esc=cancel)".to_string(),
+                                action_on_confirm: ConfirmAction::DiscardEditor,
+                            });
+                        } else {
+                            self.popup = None;
+                        }
+                    }
+                    return;
+                }
+                _ => {} // fall through for unhandled actions (e.g. Quit)
+            }
+        }
+
         // ScanConfig popup intercepts navigation before the main action switch
         if let Some(Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth }) = &mut self.popup {
             match &action {
@@ -1037,7 +1384,9 @@ impl App {
             Action::EditorLoaded(state) => {
                 self.popup = Some(Popup::Editor(state));
             }
-            // Editor actions handled by intercept block (Plan 02) — stubs to prevent non-exhaustive match
+            // Editor actions are handled by the intercept block above.
+            // These arms exist to satisfy the exhaustive match — they are unreachable when
+            // the editor popup is open because the intercept block returns early.
             Action::EditorSwitchTab
             | Action::EditorConfirmEdit
             | Action::EditorCancelEdit
@@ -1317,6 +1666,9 @@ impl App {
                                         }
                                     }
                                 });
+                            }
+                            ConfirmAction::DiscardEditor => {
+                                // User confirmed discarding changes — popup already taken, just close
                             }
                         },
                         Popup::Help => {}

@@ -116,7 +116,11 @@ async fn main() -> Result<()> {
                 } else if is_scan_config_active(&app) {
                     remap_scan_config_action(event_action)
                 } else if is_editor_active(&app) {
-                    remap_editor_action(event_action)
+                    if is_editor_editing(&app) {
+                        remap_editor_edit_action(event_action)
+                    } else {
+                        remap_editor_action(event_action)
+                    }
                 } else if is_wizard_active(&app) {
                     remap_wizard_action(event_action)
                 } else if app.search_active && app.popup.is_none() {
@@ -154,6 +158,14 @@ fn is_wizard_active(app: &App) -> bool {
 
 fn is_editor_active(app: &App) -> bool {
     matches!(app.popup, Some(Popup::Editor(_)))
+}
+
+fn is_editor_editing(app: &App) -> bool {
+    if let Some(Popup::Editor(ref state)) = app.popup {
+        state.editing
+    } else {
+        false
+    }
 }
 
 /// In wizard popup mode, route chars to wizard navigation actions
@@ -239,10 +251,39 @@ fn remap_search_action(action: Action) -> Action {
     }
 }
 
-/// In inline editor popup mode, pass through cancel; all other keys are no-ops (Plan 02 replaces)
+/// Editor popup — normal navigation mode (not typing in a cell)
 fn remap_editor_action(action: Action) -> Action {
     match action {
-        Action::CancelPopup => Action::CancelPopup,
+        Action::SearchInput(c) => match c {
+            'j' => Action::MoveDown,
+            'k' => Action::MoveUp,
+            'h' => Action::EditorSwitchTab,  // backward (cycles via handle_action)
+            'l' => Action::EditorSwitchTab,  // forward (cycles via handle_action)
+            'e' => Action::EditorStartEdit,
+            'a' => Action::EditorAddTool,    // context-dependent in handle_action
+            'A' => Action::EditorAddEnvVar,
+            'T' => Action::EditorAddTask,
+            'd' => Action::EditorDeleteRow,
+            'w' => Action::EditorWrite,
+            'q' => Action::EditorClose,
+            _ => Action::None,
+        },
+        Action::NextTab => Action::EditorSwitchTab,
+        Action::PrevTab => Action::EditorSwitchTab,
+        Action::Confirm => Action::EditorStartEdit, // Enter starts editing selected row
+        Action::CancelPopup => Action::EditorClose,
+        Action::MoveUp | Action::MoveDown | Action::PageUp | Action::PageDown => action,
+        _ => Action::None,
+    }
+}
+
+/// Editor popup — inline edit mode (typing into a cell)
+fn remap_editor_edit_action(action: Action) -> Action {
+    match action {
+        Action::SearchInput(c) => Action::EditorInput(c),
+        Action::SearchBackspace => Action::EditorBackspace,
+        Action::Confirm => Action::EditorConfirmEdit,
+        Action::CancelPopup => Action::EditorCancelEdit,
         _ => Action::None,
     }
 }
