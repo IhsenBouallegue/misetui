@@ -280,3 +280,50 @@ pub struct MiseProject {
     /// Per-tool health breakdown (populated during scan).
     pub tools: Vec<ProjectToolHealth>,
 }
+
+/// A tool detected from filesystem indicators or migrated from legacy pin files.
+#[derive(Debug, Clone)]
+pub struct DetectedTool {
+    /// Short tool name as used by mise (e.g. "node", "python", "rust", "go", "ruby", "php").
+    pub name: String,
+    /// Version string if migrated from a legacy pin file (e.g. "20.11.0"), or empty if auto-detected without a pin.
+    pub version: String,
+    /// Source description for display (e.g. "package.json", ".nvmrc", "Cargo.toml").
+    pub source: String,
+    /// Whether this tool is toggled ON (will be written to .mise.toml). Defaults to true.
+    pub enabled: bool,
+    /// True if this tool version is already installed locally (from `mise ls -J` cross-reference).
+    pub installed: bool,
+}
+
+/// Multi-step wizard state for BOOT-01 through BOOT-07.
+#[derive(Debug, Clone)]
+pub struct WizardState {
+    /// Target directory for the .mise.toml to be written.
+    pub target_dir: String,
+    /// Current step in the wizard flow.
+    pub step: WizardStep,
+    /// Tools detected/migrated — each with enabled flag for toggling in Review step.
+    pub tools: Vec<DetectedTool>,
+    /// Which tool row is currently highlighted in Review step.
+    pub selected: usize,
+    /// Generated .mise.toml content (populated when entering Preview step).
+    pub preview_content: String,
+    /// If true, write AGENTS.md and CLAUDE.md alongside .mise.toml (BOOT-07).
+    pub write_agent_files: bool,
+    /// Scroll offset for Preview step paragraph.
+    pub preview_scroll: usize,
+}
+
+/// Steps in the Bootstrap Wizard flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WizardStep {
+    /// Scanning filesystem — spinner shown.
+    Detecting,
+    /// User reviews and toggles tool list.
+    Review,
+    /// User previews the generated .mise.toml content.
+    Preview,
+    /// Writing file and running mise install — spinner shown.
+    Writing,
+}
