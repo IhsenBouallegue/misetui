@@ -2,7 +2,7 @@ use crate::action::Action;
 use crate::mise;
 use crate::model::{
     ConfigFile, DriftState, EditorEnvRow, EditorRowStatus, EditorState, EditorTaskRow,
-    EditorToolRow, EnvVar, InlineEdit, InstalledTool, MiseProject, MiseSetting, MiseTask,
+    EditorToolRow, EnvVar, InstalledTool, MiseProject, MiseSetting, MiseTask,
     OutdatedTool, RegistryEntry, WizardState, WizardStep,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -110,6 +110,15 @@ pub enum Popup {
         /// Working copy of max_depth being edited.
         max_depth: usize,
     },
+    Editor {
+        config_idx: usize,
+        row_idx: usize,
+        tab: Tab,
+        field0: String,
+        field1: String,
+        active_field: usize,
+        is_new: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -214,10 +223,9 @@ pub struct App {
     // Bootstrap wizard state (lives on App, rendered as tab content)
     pub wizard: WizardState,
 
-    // Inline editor state (loaded per config file at startup)
+    // Editor state (loaded per config file at startup)
     pub editor_states: Vec<EditorState>,
     pub editor_states_loaded: bool,
-    pub inline_editing: Option<InlineEdit>,
 
     // Action channel for async operations
     pub action_tx: mpsc::UnboundedSender<Action>,
@@ -307,7 +315,6 @@ impl App {
             },
             editor_states: Vec::new(),
             editor_states_loaded: false,
-            inline_editing: None,
             action_tx,
         }
     }
@@ -385,19 +392,27 @@ impl App {
     }
 
     pub fn handle_action(&mut self, action: Action) {
-        // Inline editing intercept — when user is typing into a cell, block all other actions
-        if self.inline_editing.is_some() {
+        // Editor popup intercept — when popup editor is open, block all other actions
+        if let Some(Popup::Editor { ref mut field0, ref mut field1, ref mut active_field, .. }) = self.popup {
             match &action {
                 Action::EditorInput(c) => {
-                    if let Some(ref mut edit) = self.inline_editing {
-                        edit.buffer.push(*c);
+                    if *active_field == 0 {
+                        field0.push(*c);
+                    } else {
+                        field1.push(*c);
                     }
                     return;
                 }
                 Action::EditorBackspace => {
-                    if let Some(ref mut edit) = self.inline_editing {
-                        edit.buffer.pop();
+                    if *active_field == 0 {
+                        field0.pop();
+                    } else {
+                        field1.pop();
                     }
+                    return;
+                }
+                Action::EditorNextField => {
+                    *active_field = if *active_field == 0 { 1 } else { 0 };
                     return;
                 }
                 Action::EditorConfirmEdit => {
@@ -405,10 +420,10 @@ impl App {
                     return;
                 }
                 Action::EditorCancelEdit => {
-                    self.inline_editing = None;
+                    self.popup = None;
                     return;
                 }
-                _ => return, // block everything else while editing
+                _ => return, // block everything else while popup editor is open
             }
         }
 
@@ -1066,8 +1081,9 @@ impl App {
                 self.editor_states = states;
                 self.editor_states_loaded = true;
             }
-            // Inline editor actions handled by intercept block above or methods below
+            // Editor popup actions handled by intercept block above or methods below
             Action::EditorConfirmEdit | Action::EditorCancelEdit
+            | Action::EditorNextField
             | Action::EditorInput(_) | Action::EditorBackspace => {}
             Action::EditorAddRow => {
                 self.handle_editor_add_row();
@@ -1337,6 +1353,9 @@ impl App {
                         Popup::ScanConfig { .. } => {
                             // ScanConfig confirm is handled by the intercept block above
                         }
+                        Popup::Editor { .. } => {
+                            // Editor confirm is handled by the intercept block above
+                        }
                     }
                 } else if self.tab == Tab::Bootstrap && self.wizard.step == WizardStep::Idle {
                     // Start wizard detection
@@ -1351,7 +1370,7 @@ impl App {
                     // No popup open — dispatch Enter contextually by tab
                     match self.tab {
                         Tab::Tools | Tab::Environment | Tab::Tasks => {
-                            self.start_inline_edit();
+                            self.start_editor_popup();
                         }
                         Tab::Projects => {
                             if self.projects_drill_active {
@@ -1432,8 +1451,8 @@ impl App {
         }
     }
 
-    fn start_inline_edit(&mut self) {
-        if !self.editor_states_loaded || self.inline_editing.is_some() {
+    fn start_editor_popup(&mut self) {
+        if !self.editor_states_loaded || self.popup.is_some() {
             return;
         }
         match self.tab {
@@ -1443,9 +1462,11 @@ impl App {
                     let source = tool.source.clone();
                     let name = tool.name.clone();
                     if let Some((ci, ri)) = self.find_editor_tool(&source, &name) {
-                        let buffer = self.editor_states[ci].tools[ri].version.clone();
-                        self.inline_editing = Some(InlineEdit {
-                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        let row = &self.editor_states[ci].tools[ri];
+                        self.popup = Some(Popup::Editor {
+                            config_idx: ci, row_idx: ri, tab: Tab::Tools,
+                            field0: row.name.clone(), field1: row.version.clone(),
+                            active_field: 1, is_new: false,
                         });
                     }
                 }
@@ -1456,9 +1477,11 @@ impl App {
                     let source = var.source.clone();
                     let key = var.name.clone();
                     if let Some((ci, ri)) = self.find_editor_env(&source, &key) {
-                        let buffer = self.editor_states[ci].env_vars[ri].value.clone();
-                        self.inline_editing = Some(InlineEdit {
-                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        let row = &self.editor_states[ci].env_vars[ri];
+                        self.popup = Some(Popup::Editor {
+                            config_idx: ci, row_idx: ri, tab: Tab::Environment,
+                            field0: row.key.clone(), field1: row.value.clone(),
+                            active_field: 1, is_new: false,
                         });
                     }
                 }
@@ -1469,9 +1492,11 @@ impl App {
                     let source = task.source.clone();
                     let name = task.name.clone();
                     if let Some((ci, ri)) = self.find_editor_task(&source, &name) {
-                        let buffer = self.editor_states[ci].tasks[ri].command.clone();
-                        self.inline_editing = Some(InlineEdit {
-                            config_idx: ci, row_idx: ri, column: 1, buffer,
+                        let row = &self.editor_states[ci].tasks[ri];
+                        self.popup = Some(Popup::Editor {
+                            config_idx: ci, row_idx: ri, tab: Tab::Tasks,
+                            field0: row.name.clone(), field1: row.command.clone(),
+                            active_field: 1, is_new: false,
                         });
                     }
                 }
@@ -1520,31 +1545,25 @@ impl App {
     }
 
     fn handle_editor_confirm_edit(&mut self) {
-        let edit = match self.inline_editing.take() {
-            Some(e) => e,
-            None => return,
+        let (config_idx, row_idx, tab, field0, field1) = match self.popup.take() {
+            Some(Popup::Editor { config_idx, row_idx, tab, field0, field1, .. }) => {
+                (config_idx, row_idx, tab, field0, field1)
+            }
+            other => { self.popup = other; return; }
         };
-        let state = &mut self.editor_states[edit.config_idx];
-        match self.tab {
+        let state = &mut self.editor_states[config_idx];
+        match tab {
             Tab::Tools => {
-                if let Some(row) = state.tools.get_mut(edit.row_idx) {
-                    if edit.column == 0 {
-                        if row.name != edit.buffer {
-                            row.name = edit.buffer.clone();
-                            if row.status == EditorRowStatus::Unchanged {
-                                row.status = EditorRowStatus::Modified;
-                            }
-                            state.dirty = true;
+                if let Some(row) = state.tools.get_mut(row_idx) {
+                    if row.name != field0 {
+                        row.name = field0;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
                         }
-                        if row.status == EditorRowStatus::Added {
-                            self.inline_editing = Some(InlineEdit {
-                                config_idx: edit.config_idx, row_idx: edit.row_idx,
-                                column: 1, buffer: row.version.clone(),
-                            });
-                            return;
-                        }
-                    } else if row.version != edit.buffer {
-                        row.version = edit.buffer;
+                        state.dirty = true;
+                    }
+                    if row.version != field1 {
+                        row.version = field1;
                         if row.status == EditorRowStatus::Unchanged {
                             row.status = EditorRowStatus::Modified;
                         }
@@ -1553,24 +1572,16 @@ impl App {
                 }
             }
             Tab::Environment => {
-                if let Some(row) = state.env_vars.get_mut(edit.row_idx) {
-                    if edit.column == 0 {
-                        if row.key != edit.buffer {
-                            row.key = edit.buffer.clone();
-                            if row.status == EditorRowStatus::Unchanged {
-                                row.status = EditorRowStatus::Modified;
-                            }
-                            state.dirty = true;
+                if let Some(row) = state.env_vars.get_mut(row_idx) {
+                    if row.key != field0 {
+                        row.key = field0;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
                         }
-                        if row.status == EditorRowStatus::Added {
-                            self.inline_editing = Some(InlineEdit {
-                                config_idx: edit.config_idx, row_idx: edit.row_idx,
-                                column: 1, buffer: row.value.clone(),
-                            });
-                            return;
-                        }
-                    } else if row.value != edit.buffer {
-                        row.value = edit.buffer;
+                        state.dirty = true;
+                    }
+                    if row.value != field1 {
+                        row.value = field1;
                         if row.status == EditorRowStatus::Unchanged {
                             row.status = EditorRowStatus::Modified;
                         }
@@ -1579,24 +1590,16 @@ impl App {
                 }
             }
             Tab::Tasks => {
-                if let Some(row) = state.tasks.get_mut(edit.row_idx) {
-                    if edit.column == 0 {
-                        if row.name != edit.buffer {
-                            row.name = edit.buffer.clone();
-                            if row.status == EditorRowStatus::Unchanged {
-                                row.status = EditorRowStatus::Modified;
-                            }
-                            state.dirty = true;
+                if let Some(row) = state.tasks.get_mut(row_idx) {
+                    if row.name != field0 {
+                        row.name = field0;
+                        if row.status == EditorRowStatus::Unchanged {
+                            row.status = EditorRowStatus::Modified;
                         }
-                        if row.status == EditorRowStatus::Added {
-                            self.inline_editing = Some(InlineEdit {
-                                config_idx: edit.config_idx, row_idx: edit.row_idx,
-                                column: 1, buffer: row.command.clone(),
-                            });
-                            return;
-                        }
-                    } else if row.command != edit.buffer {
-                        row.command = edit.buffer;
+                        state.dirty = true;
+                    }
+                    if row.command != field1 {
+                        row.command = field1;
                         if row.status == EditorRowStatus::Unchanged {
                             row.status = EditorRowStatus::Modified;
                         }
@@ -1609,7 +1612,7 @@ impl App {
     }
 
     fn handle_editor_add_row(&mut self) {
-        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+        if !self.editor_states_loaded || self.popup.is_some() {
             return;
         }
         let source_path = match self.tab {
@@ -1629,6 +1632,7 @@ impl App {
             Some(i) => i,
             None => return,
         };
+        let tab = self.tab;
         match self.tab {
             Tab::Tools => {
                 self.editor_states[config_idx].tools.push(EditorToolRow {
@@ -1637,8 +1641,10 @@ impl App {
                 });
                 let row_idx = self.editor_states[config_idx].tools.len() - 1;
                 self.editor_states[config_idx].dirty = true;
-                self.inline_editing = Some(InlineEdit {
-                    config_idx, row_idx, column: 0, buffer: String::new(),
+                self.popup = Some(Popup::Editor {
+                    config_idx, row_idx, tab,
+                    field0: String::new(), field1: "latest".to_string(),
+                    active_field: 0, is_new: true,
                 });
             }
             Tab::Environment => {
@@ -1648,8 +1654,10 @@ impl App {
                 });
                 let row_idx = self.editor_states[config_idx].env_vars.len() - 1;
                 self.editor_states[config_idx].dirty = true;
-                self.inline_editing = Some(InlineEdit {
-                    config_idx, row_idx, column: 0, buffer: String::new(),
+                self.popup = Some(Popup::Editor {
+                    config_idx, row_idx, tab,
+                    field0: String::new(), field1: String::new(),
+                    active_field: 0, is_new: true,
                 });
             }
             Tab::Tasks => {
@@ -1659,8 +1667,10 @@ impl App {
                 });
                 let row_idx = self.editor_states[config_idx].tasks.len() - 1;
                 self.editor_states[config_idx].dirty = true;
-                self.inline_editing = Some(InlineEdit {
-                    config_idx, row_idx, column: 0, buffer: String::new(),
+                self.popup = Some(Popup::Editor {
+                    config_idx, row_idx, tab,
+                    field0: String::new(), field1: String::new(),
+                    active_field: 0, is_new: true,
                 });
             }
             _ => {}
@@ -1668,7 +1678,7 @@ impl App {
     }
 
     fn handle_editor_delete_row(&mut self) {
-        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+        if !self.editor_states_loaded || self.popup.is_some() {
             return;
         }
         match self.tab {
@@ -1725,7 +1735,7 @@ impl App {
     }
 
     fn handle_editor_write(&mut self) {
-        if !self.editor_states_loaded || self.inline_editing.is_some() || self.popup.is_some() {
+        if !self.editor_states_loaded || self.popup.is_some() {
             return;
         }
         let dirty_states: Vec<EditorState> = self.editor_states.iter()
@@ -1815,38 +1825,6 @@ impl App {
             .filter(|s| s.file_path == file_path)
             .flat_map(|s| s.tasks.iter().filter(|r| r.status == EditorRowStatus::Added))
             .collect()
-    }
-
-    pub fn is_editing_tool(&self, source: &str, name: &str) -> Option<&InlineEdit> {
-        let edit = self.inline_editing.as_ref()?;
-        let state = self.editor_states.get(edit.config_idx)?;
-        if state.file_path != source { return None; }
-        let row = state.tools.get(edit.row_idx)?;
-        if row.name == name { Some(edit) } else { None }
-    }
-
-    pub fn is_editing_env(&self, source: &str, key: &str) -> Option<&InlineEdit> {
-        let edit = self.inline_editing.as_ref()?;
-        let state = self.editor_states.get(edit.config_idx)?;
-        if state.file_path != source { return None; }
-        let row = state.env_vars.get(edit.row_idx)?;
-        if row.key == key { Some(edit) } else { None }
-    }
-
-    pub fn is_editing_task(&self, source: &str, name: &str) -> Option<&InlineEdit> {
-        let edit = self.inline_editing.as_ref()?;
-        let state = self.editor_states.get(edit.config_idx)?;
-        if state.file_path != source { return None; }
-        let row = state.tasks.get(edit.row_idx)?;
-        if row.name == name { Some(edit) } else { None }
-    }
-
-    #[allow(dead_code)]
-    pub fn is_editing_added_tool(&self, config_path: &str, row_idx: usize) -> Option<&InlineEdit> {
-        let edit = self.inline_editing.as_ref()?;
-        let state = self.editor_states.get(edit.config_idx)?;
-        if state.file_path != config_path { return None; }
-        if edit.row_idx == row_idx { Some(edit) } else { None }
     }
 
     pub fn has_unsaved_editor_changes(&self) -> bool {
@@ -2024,7 +2002,18 @@ impl App {
 
     fn update_filtered_tools(&mut self) {
         if self.search_query.is_empty() {
-            self.filtered_tools = (0..self.tools.len()).collect();
+            let mut indices: Vec<usize> = (0..self.tools.len()).collect();
+            // Sort by (source, name) to match the BTreeMap-grouped visual order so
+            // j/k navigation is always linear through the displayed rows.
+            indices.sort_by(|&a, &b| {
+                let ta = &self.tools[a];
+                let tb = &self.tools[b];
+                let ka: &str = if ta.source.is_empty() { "(runtime)" } else { &ta.source };
+                let kb: &str = if tb.source.is_empty() { "(runtime)" } else { &tb.source };
+                ka.cmp(kb)
+                    .then_with(|| ta.name.to_lowercase().cmp(&tb.name.to_lowercase()))
+            });
+            self.filtered_tools = indices;
             self.tools_hl = vec![vec![]; self.tools.len()];
             return;
         }
@@ -2240,11 +2229,18 @@ impl App {
                 self.filtered_tools.sort_by(|&a, &b| {
                     let ta = &self.tools[a];
                     let tb = &self.tools[b];
+                    // Always group by source first so navigation stays linear.
+                    let ka: &str = if ta.source.is_empty() { "(runtime)" } else { &ta.source };
+                    let kb: &str = if tb.source.is_empty() { "(runtime)" } else { &tb.source };
+                    let group_cmp = ka.cmp(kb);
+                    if group_cmp != std::cmp::Ordering::Equal {
+                        return group_cmp;
+                    }
                     let cmp = match col {
                         0 => ta.name.to_lowercase().cmp(&tb.name.to_lowercase()),
                         1 => ta.version.cmp(&tb.version),
                         2 => ta.active.cmp(&tb.active),
-                        _ => ta.source.to_lowercase().cmp(&tb.source.to_lowercase()),
+                        _ => ta.name.to_lowercase().cmp(&tb.name.to_lowercase()),
                     };
                     if asc { cmp } else { cmp.reverse() }
                 });

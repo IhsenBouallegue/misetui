@@ -111,8 +111,8 @@ async fn main() -> Result<()> {
         // Wait for next event or action
         tokio::select! {
             Some(event_action) = events.next() => {
-                let action = if is_inline_editing(&app) {
-                    remap_inline_edit_action(event_action)
+                let action = if is_editor_popup_active(&app) {
+                    remap_editor_popup_action(event_action)
                 } else if is_version_picker_active(&app) {
                     remap_version_picker_action(event_action)
                 } else if is_scan_config_active(&app) {
@@ -152,8 +152,8 @@ fn is_wizard_active(app: &App) -> bool {
     app.tab == Tab::Bootstrap && app.wizard.step != WizardStep::Idle
 }
 
-fn is_inline_editing(app: &App) -> bool {
-    app.inline_editing.is_some()
+fn is_editor_popup_active(app: &App) -> bool {
+    matches!(app.popup, Some(Popup::Editor { .. }))
 }
 
 /// In wizard popup mode, route chars to wizard navigation actions
@@ -241,13 +241,14 @@ fn remap_search_action(action: Action) -> Action {
     }
 }
 
-/// Inline edit mode — typing into a table cell
-fn remap_inline_edit_action(action: Action) -> Action {
+/// Editor popup mode — typing into the popup form fields
+fn remap_editor_popup_action(action: Action) -> Action {
     match action {
         Action::SearchInput(c) => Action::EditorInput(c),
         Action::SearchBackspace => Action::EditorBackspace,
         Action::Confirm => Action::EditorConfirmEdit,
         Action::CancelPopup => Action::EditorCancelEdit,
+        Action::NextTab => Action::EditorNextField,
         _ => Action::None,
     }
 }

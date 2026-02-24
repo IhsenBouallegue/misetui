@@ -142,27 +142,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 let style = status_style(edit_status);
                 let marker = status_marker(edit_status);
 
-                let editing = app.is_editing_env(&var.source, &var.name);
+                let name_cell = Cell::from(Line::from(vec![
+                    Span::styled(format!("{marker} "), style),
+                    Span::styled(&var.name, style),
+                ]));
 
-                let name_cell = if let Some(edit) = editing.filter(|e| e.column == 0) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&var.name, style),
-                    ]))
-                };
-
-                let value_cell = if let Some(edit) = editing.filter(|e| e.column == 1) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else if let Some((_, Some(ref mod_val))) = overlay {
+                let value_cell = if let Some((_, Some(ref mod_val))) = overlay {
                     let truncated: String = mod_val.chars().take(50).collect();
                     Cell::from(Span::styled(truncated, Style::default().fg(theme::YELLOW)))
                 } else {

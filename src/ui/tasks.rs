@@ -140,27 +140,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 let style = status_style(edit_status);
                 let marker = status_marker(edit_status);
 
-                let editing = app.is_editing_task(&task.source, &task.name);
+                let name_cell = Cell::from(Line::from(vec![
+                    Span::styled(format!("{marker} "), style),
+                    Span::styled(&task.name, style),
+                ]));
 
-                let name_cell = if let Some(edit) = editing.filter(|e| e.column == 0) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&task.name, style),
-                    ]))
-                };
-
-                let desc_cell = if let Some(edit) = editing.filter(|e| e.column == 1) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else if let Some((_, Some(ref mod_cmd))) = overlay {
+                let desc_cell = if let Some((_, Some(ref mod_cmd))) = overlay {
                     Cell::from(Span::styled(mod_cmd.clone(), Style::default().fg(theme::YELLOW)))
                 } else {
                     Cell::from(Span::styled(task.description.clone(), theme::table_row()))

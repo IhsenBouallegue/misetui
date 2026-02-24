@@ -49,10 +49,11 @@ pub enum Action {
     WizardPrevStep,
     WizardCompleted(String),
 
-    // Inline Editor (editing directly in tab tables)
+    // Editor (popup-based editing of config rows)
     EditorStatesLoaded(Vec<EditorState>),
     EditorConfirmEdit,
     EditorCancelEdit,
+    EditorNextField,
     EditorDeleteRow,
     EditorAddRow,
     EditorWrite,

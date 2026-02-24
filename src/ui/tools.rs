@@ -147,28 +147,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                     Cell::from(Span::styled("\u{25cb} inactive", theme::inactive_indicator()))
                 };
 
-                // Check for inline editing
-                let editing = app.is_editing_tool(&tool.source, &tool.name);
+                let name_cell = Cell::from(Line::from(vec![
+                    Span::styled(format!("{marker} "), style),
+                    Span::styled(&tool.name, style),
+                ]));
 
-                let name_cell = if let Some(edit) = editing.filter(|e| e.column == 0) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else {
-                    Cell::from(Line::from(vec![
-                        Span::styled(format!("{marker} "), style),
-                        Span::styled(&tool.name, style),
-                    ]))
-                };
-
-                let version_cell = if let Some(edit) = editing.filter(|e| e.column == 1) {
-                    Cell::from(Line::from(vec![
-                        Span::styled(&edit.buffer, theme::search_input()),
-                        Span::styled("\u{2588}", theme::search_input()),
-                    ]))
-                } else if let Some((_, Some(ref mod_ver))) = overlay {
+                let version_cell = if let Some((_, Some(ref mod_ver))) = overlay {
                     Cell::from(Line::from(vec![
                         Span::styled(mod_ver.clone(), Style::default().fg(theme::YELLOW)),
                     ]))

@@ -85,8 +85,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
     hints.push(("p", "prune"));
 
-    if app.inline_editing.is_some() {
-        hints = vec![("Enter", "confirm"), ("Esc", "cancel")];
+    if matches!(app.popup, Some(crate::app::Popup::Editor { .. })) {
+        hints = vec![("Tab", "switch"), ("Enter", "confirm"), ("Esc", "cancel")];
     } else if app.search_active {
         hints = vec![("Esc", "cancel search"), ("Type", "to filter")];
     }

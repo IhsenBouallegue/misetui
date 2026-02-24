@@ -1,4 +1,4 @@
-use crate::app::{App, Popup};
+use crate::app::{App, Popup, Tab};
 use crate::theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
@@ -42,6 +42,9 @@ pub fn render(f: &mut Frame, app: &App) {
         Popup::Help => render_help(f),
         Popup::ScanConfig { dirs, selected, adding, new_dir, max_depth } => {
             render_scan_config(f, dirs, *selected, *adding, new_dir, *max_depth)
+        }
+        Popup::Editor { tab, field0, field1, active_field, .. } => {
+            render_editor(f, *tab, field0, field1, *active_field)
         }
     }
 }
@@ -370,6 +373,78 @@ fn render_scan_config(
         Span::styled(" depth  ", theme::key_desc()),
         Span::styled("Enter", theme::key_hint()),
         Span::styled(" save  ", theme::key_desc()),
+        Span::styled("Esc", theme::key_hint()),
+        Span::styled(" cancel", theme::key_desc()),
+    ]);
+    f.render_widget(Paragraph::new(hint), chunks[5]);
+}
+
+fn render_editor(f: &mut Frame, tab: Tab, field0: &str, field1: &str, active_field: usize) {
+    let area = centered_rect(48, 10, f.area());
+    f.render_widget(Clear, area);
+
+    let title = match tab {
+        Tab::Tools => " Edit Tool ",
+        Tab::Environment => " Edit Env Var ",
+        Tab::Tasks => " Edit Task ",
+        _ => " Edit ",
+    };
+
+    let block = Block::default()
+        .title(Span::styled(title, theme::title()))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::popup_border())
+        .style(theme::popup_bg());
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let (label0, label1) = match tab {
+        Tab::Tools => ("Name", "Version"),
+        Tab::Environment => ("Key", "Value"),
+        Tab::Tasks => ("Name", "Command"),
+        _ => ("Field 1", "Field 2"),
+    };
+
+    let chunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // field0
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // field1
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // hints
+        ])
+        .split(inner);
+
+    // Field 0
+    let f0_style = if active_field == 0 { theme::search_input() } else { theme::table_row() };
+    let f0_cursor = if active_field == 0 { "\u{2588}" } else { "" };
+    let field0_line = Line::from(vec![
+        Span::styled(format!("  {label0}: "), theme::key_desc()),
+        Span::styled(field0, f0_style),
+        Span::styled(f0_cursor, f0_style),
+    ]);
+    f.render_widget(Paragraph::new(field0_line), chunks[1]);
+
+    // Field 1
+    let f1_style = if active_field == 1 { theme::search_input() } else { theme::table_row() };
+    let f1_cursor = if active_field == 1 { "\u{2588}" } else { "" };
+    let field1_line = Line::from(vec![
+        Span::styled(format!("  {label1}: "), theme::key_desc()),
+        Span::styled(field1, f1_style),
+        Span::styled(f1_cursor, f1_style),
+    ]);
+    f.render_widget(Paragraph::new(field1_line), chunks[3]);
+
+    // Hints
+    let hint = Line::from(vec![
+        Span::styled("  Tab", theme::key_hint()),
+        Span::styled(" switch  ", theme::key_desc()),
+        Span::styled("Enter", theme::key_hint()),
+        Span::styled(" confirm  ", theme::key_desc()),
         Span::styled("Esc", theme::key_hint()),
         Span::styled(" cancel", theme::key_desc()),
     ]);
